@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --border: #2d3148;
+  --text: #e2e8f0;
+  --muted: #64748b;
+  --accent: #6366f1;
+  --green: #22c55e;
+  --yellow: #eab308;
+  --red: #ef4444;
+  --blue: #3b82f6;
+  --purple: #a855f7;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* Log entry types */
+.log-outgoing    { border-left-color: var(--blue); }
+.log-incoming    { border-left-color: var(--green); }
+.log-tool_call   { border-left-color: var(--purple); }
+.log-n8n_request { border-left-color: var(--yellow); }
+.log-n8n_response{ border-left-color: var(--green); }
+.log-error       { border-left-color: var(--red); }
+.log-info        { border-left-color: var(--muted); }

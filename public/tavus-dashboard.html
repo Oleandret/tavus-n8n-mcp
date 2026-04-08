@@ -1,0 +1,2752 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tavus ↔ n8n ↔ MCP</title>
+<script src="https://unpkg.com/@daily-co/daily-js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:#0f1117; --surface:#1a1d27; --card:#20243a; --border:#2d3148;
+  --text:#e2e8f0; --muted:#64748b; --accent:#6366f1;
+  --green:#22c55e; --yellow:#eab308; --red:#ef4444; --blue:#3b82f6; --purple:#a855f7;
+}
+body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size:14px; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+
+/* HEADER */
+header { display:flex; align-items:center; justify-content:space-between; padding:11px 20px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
+.logo { font-size:17px; font-weight:700; color:var(--accent); }
+.logo span { color:var(--muted); font-weight:400; }
+.status-pill { display:flex; align-items:center; gap:8px; background:var(--card); border:1px solid var(--border); border-radius:20px; padding:5px 14px; font-size:13px; }
+.dot { width:8px; height:8px; border-radius:50%; background:var(--muted); transition:background .3s; }
+.dot.starting { background:var(--yellow); animation:pulse 1s infinite; }
+.dot.active   { background:var(--green); }
+.dot.error    { background:var(--red); }
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* MAIN TABS */
+.tabs { display:flex; gap:2px; padding:8px 20px 0; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
+.tab-btn { padding:8px 18px; border:none; border-radius:6px 6px 0 0; background:transparent; color:var(--muted); cursor:pointer; font-size:13px; font-weight:500; border-bottom:2px solid transparent; transition:color .2s,border-color .2s; }
+.tab-btn:hover { color:var(--text); }
+.tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+.tab-panel { display:none; flex:1; overflow:hidden; }
+.tab-panel.active { display:flex; }
+
+/* SAMTALE LAYOUT */
+#panel-samtale { flex-direction:row; }
+.sidebar { width:240px; flex-shrink:0; background:var(--surface); border-right:1px solid var(--border); padding:14px; display:flex; flex-direction:column; gap:12px; overflow-y:auto; }
+.sidebar-title { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+.info-label { font-size:11px; color:var(--muted); margin-bottom:3px; }
+.info-value { font-size:11px; font-family:monospace; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:5px 8px; color:var(--muted); word-break:break-all; }
+.btn { padding:9px 14px; border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; transition:opacity .2s; width:100%; }
+.btn:disabled { opacity:.4; cursor:not-allowed; }
+.btn-primary { background:var(--accent); color:#fff; }
+.btn-danger  { background:transparent; color:var(--red); border:1px solid var(--red); }
+.btn-ghost   { background:transparent; color:var(--muted); border:1px solid var(--border); font-weight:400; font-size:12px; padding:7px; }
+.dataflyt { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:11px; font-size:11px; color:var(--muted); line-height:1.9; margin-top:auto; }
+.dataflyt strong { color:var(--text); }
+code { color:var(--accent); font-family:monospace; }
+
+/* VIDEO */
+.video-area { flex:1; background:var(--bg); position:relative; overflow:hidden; }
+#daily-container { position:absolute; inset:0; width:100%; height:100%; }
+.video-overlay { position:absolute; inset:0; z-index:10; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; color:var(--muted); text-align:center; background:var(--bg); }
+.video-overlay .emoji { font-size:48px; }
+.spinner { width:34px; height:34px; border-radius:50%; border:3px solid var(--border); border-top-color:var(--accent); animation:spin .8s linear infinite; }
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* LOG */
+.log-panel { width:320px; flex-shrink:0; background:var(--surface); border-left:1px solid var(--border); display:flex; flex-direction:column; }
+.log-header { padding:9px 12px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
+.log-header-title { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+.log-list { flex:1; overflow-y:auto; padding:6px; display:flex; flex-direction:column; gap:3px; }
+.log-entry { border-radius:6px; padding:6px 9px; font-size:11px; background:var(--bg); border-left:3px solid var(--border); }
+.log-entry.outgoing    { border-left-color:var(--blue); }
+.log-entry.incoming    { border-left-color:var(--green); }
+.log-entry.tool_call   { border-left-color:var(--purple); }
+.log-entry.n8n_request { border-left-color:var(--yellow); }
+.log-entry.n8n_response{ border-left-color:var(--green); }
+.log-entry.error       { border-left-color:var(--red); }
+.log-entry.info        { border-left-color:var(--muted); }
+.log-row { display:flex; align-items:flex-start; gap:5px; margin-bottom:2px; }
+.log-icon.outgoing    { color:var(--blue); }
+.log-icon.incoming    { color:var(--green); }
+.log-icon.tool_call   { color:var(--purple); }
+.log-icon.n8n_request { color:var(--yellow); }
+.log-icon.n8n_response{ color:var(--green); }
+.log-icon.error       { color:var(--red); }
+.log-icon.info        { color:var(--muted); }
+.log-label { flex:1; color:var(--text); font-weight:500; }
+.log-time  { flex-shrink:0; color:var(--muted); font-size:10px; }
+.log-data summary { color:var(--muted); cursor:pointer; font-size:10px; margin-top:3px; }
+.log-data pre { margin-top:3px; color:var(--muted); font-size:10px; white-space:pre-wrap; word-break:break-all; max-height:100px; overflow-y:auto; }
+
+/* =====================================================
+   INNSTILLINGER
+   ===================================================== */
+#panel-innstillinger { flex-direction:column; overflow:hidden; }
+
+/* Sub-tabs */
+.stabs { display:flex; gap:4px; padding:10px 20px 0; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; overflow-x:auto; }
+.stab-btn { padding:7px 14px; border:none; border-radius:6px 6px 0 0; background:transparent; color:var(--muted); cursor:pointer; font-size:12px; font-weight:500; border-bottom:2px solid transparent; white-space:nowrap; }
+.stab-btn:hover { color:var(--text); }
+.stab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+.stab-panels { flex:1; overflow-y:auto; padding:20px; display:flex; justify-content:center; }
+.stab-panel { display:none; width:100%; max-width:700px; flex-direction:column; gap:16px; }
+.stab-panel.active { display:flex; }
+
+/* Form elements */
+.section { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:18px; display:flex; flex-direction:column; gap:14px; }
+.section-title { font-size:12px; font-weight:700; color:var(--text); padding-bottom:10px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:7px; }
+.section-title .icon { font-size:15px; }
+.field { display:flex; flex-direction:column; gap:4px; }
+.field label { font-size:12px; color:var(--muted); font-weight:500; }
+.field input, .field textarea, .field select {
+  background:var(--bg); border:1px solid var(--border); border-radius:8px;
+  padding:8px 11px; color:var(--text); font-size:13px; font-family:inherit; outline:none;
+  transition:border-color .2s;
+}
+.field input:focus, .field textarea:focus, .field select:focus { border-color:var(--accent); }
+.field select option { background:var(--surface); }
+.field .hint { font-size:11px; color:var(--muted); line-height:1.5; }
+.field-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.field-row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+.field-btn-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:end; }
+
+/* Toggle */
+.toggle-row { display:flex; align-items:center; justify-content:space-between; padding:3px 0; }
+.toggle-row label { font-size:12px; color:var(--muted); }
+.toggle { position:relative; width:36px; height:20px; flex-shrink:0; }
+.toggle input { opacity:0; width:0; height:0; }
+.toggle-slider { position:absolute; inset:0; background:var(--border); border-radius:10px; cursor:pointer; transition:.3s; }
+.toggle-slider::before { content:''; position:absolute; width:14px; height:14px; left:3px; bottom:3px; background:#fff; border-radius:50%; transition:.3s; }
+.toggle input:checked + .toggle-slider { background:var(--accent); }
+.toggle input:checked + .toggle-slider::before { transform:translateX(16px); }
+
+/* MCP list */
+.mcp-list { display:flex; flex-direction:column; gap:8px; }
+.mcp-card { background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:11px 13px; display:flex; flex-direction:column; gap:8px; transition:opacity .2s; }
+.mcp-card.disabled { opacity:.45; }
+.mcp-card-row { display:flex; align-items:center; gap:8px; }
+.mcp-card-row input { background:var(--surface); border:1px solid var(--border); border-radius:7px; padding:6px 10px; color:var(--text); font-size:12px; outline:none; flex:1; }
+.mcp-card-row input:focus { border-color:var(--accent); }
+.mcp-name-input { color:var(--accent) !important; font-weight:600; font-family:monospace; }
+.btn-remove { background:none; border:1px solid var(--border); border-radius:6px; color:var(--muted); width:28px; height:28px; cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.btn-remove:hover { border-color:var(--red); color:var(--red); }
+.btn-test-mcp { background:var(--card); border:1px solid var(--border); border-radius:6px; color:var(--muted); padding:4px 10px; cursor:pointer; font-size:11px; white-space:nowrap; }
+.btn-test-mcp:hover { border-color:var(--accent); color:var(--accent); }
+.btn-add { background:none; border:1px dashed var(--border); border-radius:8px; color:var(--muted); padding:7px; cursor:pointer; font-size:12px; }
+.btn-add:hover { border-color:var(--accent); color:var(--accent); }
+
+/* Webhook cards */
+.webhook-list { display:flex; flex-direction:column; gap:10px; }
+.webhook-card { background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:13px; display:flex; flex-direction:column; gap:8px; }
+.webhook-card-header { display:flex; align-items:center; gap:8px; }
+.webhook-card-header input { background:var(--surface); border:1px solid var(--border); border-radius:7px; padding:6px 10px; color:var(--accent); font-size:12px; font-weight:600; font-family:monospace; outline:none; flex:1; }
+.webhook-card-header input:focus { border-color:var(--accent); }
+.webhook-card-header input::placeholder { color:var(--muted); font-weight:400; }
+.webhook-url-row { display:grid; grid-template-columns:1fr auto auto; gap:6px; align-items:center; }
+.webhook-url-row input { background:var(--surface); border:1px solid var(--border); border-radius:7px; padding:6px 10px; color:var(--text); font-size:12px; outline:none; }
+.webhook-url-row input:focus { border-color:var(--accent); }
+.btn-test-wh { background:var(--card); border:1px solid var(--border); border-radius:6px; color:var(--muted); padding:5px 11px; cursor:pointer; font-size:11px; white-space:nowrap; }
+.btn-test-wh:hover { border-color:var(--accent); color:var(--accent); }
+.webhook-desc input { background:var(--surface); border:1px solid var(--border); border-radius:7px; padding:6px 10px; color:var(--text); font-size:12px; outline:none; width:100%; }
+.webhook-desc input:focus { border-color:var(--accent); }
+.webhook-desc input::placeholder { color:var(--muted); font-style:italic; }
+.webhook-auth-row { display:flex; gap:6px; align-items:center; }
+.webhook-auth-row label { font-size:11px; color:var(--muted); white-space:nowrap; }
+.webhook-auth-row input { background:var(--surface); border:1px solid var(--border); border-radius:7px; padding:5px 10px; color:var(--text); font-size:11px; outline:none; flex:1; }
+.webhook-auth-row input:focus { border-color:var(--accent); }
+
+/* Bottom actions bar */
+.settings-actions { flex-shrink:0; background:var(--surface); border-top:1px solid var(--border); padding:12px 20px; display:flex; gap:10px; align-items:center; justify-content:flex-end; }
+.btn-save   { background:var(--accent); border:none; border-radius:8px; padding:9px 22px; color:#fff; font-size:13px; font-weight:600; cursor:pointer; }
+.btn-save:hover { opacity:.85; }
+.btn-push   { background:transparent; border:1px solid var(--green); border-radius:8px; padding:9px 22px; color:var(--green); font-size:13px; font-weight:600; cursor:pointer; }
+.btn-push:hover { background:rgba(34,197,94,.1); }
+.btn-push:disabled { opacity:.4; cursor:not-allowed; }
+.save-msg   { font-size:12px; color:var(--green); opacity:0; transition:opacity .3s; margin-right:auto; }
+.save-msg.show { opacity:1; }
+
+/* Toast */
+.toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--card); border:1px solid var(--border); border-radius:10px; padding:11px 20px; font-size:13px; box-shadow:0 8px 32px rgba(0,0,0,.4); opacity:0; pointer-events:none; transition:opacity .3s; z-index:999; max-width:440px; text-align:center; }
+.toast.show { opacity:1; }
+.toast.error   { border-color:var(--red); color:var(--red); }
+.toast.success { border-color:var(--green); color:var(--green); }
+
+/* Range */
+input[type=range] { accent-color:var(--accent); width:100%; }
+
+/* API status rows */
+.api-row { display:flex; align-items:center; gap:7px; font-size:11px; }
+.api-dot { width:7px; height:7px; border-radius:50%; background:var(--muted); flex-shrink:0; transition:background .4s; }
+.api-dot.ok      { background:var(--green); }
+.api-dot.err     { background:var(--red); }
+.api-dot.warn    { background:var(--yellow); }
+.api-dot.checking { background:var(--yellow); animation:pulse .8s infinite; }
+.api-dot.skip    { background:var(--muted); }
+.api-name { flex:1; color:var(--muted); }
+.api-val  { font-size:10px; color:var(--muted); font-family:monospace; }
+
+/* Tag input */
+.tag-input-area { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:6px 8px; min-height:36px; display:flex; flex-wrap:wrap; gap:5px; cursor:text; }
+.tag-input-area:focus-within { border-color:var(--accent); }
+.tag { background:var(--card); border:1px solid var(--border); border-radius:5px; padding:2px 8px; font-size:11px; display:flex; align-items:center; gap:5px; }
+.tag-x { cursor:pointer; color:var(--muted); }
+.tag-x:hover { color:var(--red); }
+.tag-input-area input { border:none; background:transparent; color:var(--text); font-size:12px; outline:none; min-width:80px; flex:1; }
+
+/* Badge */
+.badge { display:inline-block; background:var(--card); border:1px solid var(--border); border-radius:5px; padding:2px 8px; font-size:10px; font-family:monospace; color:var(--muted); }
+.badge.accent { background:rgba(99,102,241,.12); border-color:var(--accent); color:var(--accent); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width:5px; height:5px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+
+/* =====================================================
+   DEBUG TAB
+   ===================================================== */
+.dbg-filter { background:var(--card); border:1px solid var(--border); border-radius:6px; color:var(--muted); padding:4px 10px; cursor:pointer; font-size:11px; font-weight:500; transition:all .15s; white-space:nowrap; }
+.dbg-filter:hover { border-color:var(--accent); color:var(--text); }
+.dbg-filter.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+.dbg-entry { border-radius:8px; padding:8px 10px; background:var(--bg); border-left:3px solid var(--border); font-family:monospace; font-size:11px; }
+.dbg-entry.cat-error   { border-left-color:var(--red); }
+.dbg-entry.cat-tool    { border-left-color:var(--purple); }
+.dbg-entry.cat-mcp     { border-left-color:var(--blue); }
+.dbg-entry.cat-webhook { border-left-color:var(--yellow); }
+.dbg-entry.cat-tavus   { border-left-color:var(--accent); }
+.dbg-entry.cat-daily   { border-left-color:var(--green); }
+.dbg-entry.cat-info    { border-left-color:var(--muted); }
+.dbg-entry summary { color:var(--muted); cursor:pointer; font-size:10px; margin-top:3px; user-select:none; }
+.dbg-entry summary:hover { color:var(--text); }
+.dbg-entry pre { margin-top:4px; color:var(--muted); font-size:10px; white-space:pre-wrap; word-break:break-all; max-height:200px; overflow-y:auto; background:var(--surface); border-radius:4px; padding:6px; border:1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">Tavus <span>↔ n8n ↔ MCP</span></div>
+  <div class="status-pill">
+    <div class="dot" id="status-dot"></div>
+    <span id="status-label">Ikke startet</span>
+  </div>
+</header>
+
+<!-- MAIN TABS -->
+<div class="tabs">
+  <button class="tab-btn active" onclick="switchTab('samtale',this)">🎥 Samtale</button>
+  <button class="tab-btn" id="debug-tab-btn" onclick="switchTab('debug',this)">🔍 Debug <span id="debug-badge" style="display:none;background:var(--red);color:#fff;border-radius:10px;padding:1px 6px;font-size:10px;margin-left:3px">0</span></button>
+  <button class="tab-btn" onclick="switchTab('innstillinger',this)">⚙️ Innstillinger</button>
+</div>
+
+<!-- =====================================================
+     SAMTALE
+     ===================================================== -->
+<div class="tab-panel active" id="panel-samtale">
+  <div class="sidebar">
+    <div class="sidebar-title">Kontroller</div>
+    <div id="conv-id-row" style="display:none">
+      <div class="info-label">Conversation ID</div>
+      <div class="info-value" id="conv-id-display">—</div>
+    </div>
+    <button class="btn btn-primary" id="btn-start" onclick="startConversation()">▶ Start samtale</button>
+    <button class="btn btn-danger"  id="btn-stop"  onclick="stopConversation()" style="display:none">■ Avslutt</button>
+    <button class="btn btn-ghost"   onclick="clearLog()">Tøm logg</button>
+
+    <!-- Klokke -->
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 12px;text-align:center">
+      <div id="sidebar-clock" style="font-size:22px;font-weight:700;font-family:monospace;color:var(--text);letter-spacing:2px">00:00:00</div>
+      <div id="sidebar-date" style="font-size:11px;color:var(--muted);margin-top:2px"></div>
+    </div>
+
+    <!-- Transkripsjon -->
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:0;flex:1;min-height:0;overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px">
+        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)">Transkripsjon</div>
+        <button onclick="clearTranscript()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px;padding:0" title="Tøm">✕</button>
+      </div>
+      <div id="transcript-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:5px;min-height:80px;max-height:220px">
+        <div id="transcript-empty" style="color:var(--muted);font-size:11px;text-align:center;margin-top:16px">Start en samtale...</div>
+      </div>
+    </div>
+
+    <!-- API-status -->
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:7px;margin-top:auto">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:2px">API-tilkoblinger</div>
+      <div class="api-row" id="api-tavus">
+        <span class="api-dot"></span><span class="api-name">Tavus</span><span class="api-val" id="apival-tavus">—</span>
+      </div>
+      <div class="api-row" id="api-elevenlabs">
+        <span class="api-dot"></span><span class="api-name">ElevenLabs</span><span class="api-val" id="apival-el">—</span>
+      </div>
+      <div class="api-row" id="api-homey">
+        <span class="api-dot"></span><span class="api-name">Homey MCP</span><span class="api-val" id="apival-homey">—</span>
+      </div>
+      <div class="api-row" id="api-webhooks">
+        <span class="api-dot"></span><span class="api-name">Webhooks</span><span class="api-val" id="apival-webhooks">—</span>
+      </div>
+      <button onclick="checkAllApis()" style="margin-top:4px;background:none;border:1px dashed var(--border);border-radius:6px;color:var(--muted);padding:5px;cursor:pointer;font-size:11px">↻ Sjekk tilkoblinger</button>
+    </div>
+  </div>
+
+  <div class="video-area">
+    <div class="video-overlay" id="v-idle">
+      <div class="emoji">🎥</div>
+      <div>Trykk «Start samtale» for å begynne</div>
+    </div>
+    <div class="video-overlay" id="v-starting" style="display:none">
+      <div class="spinner"></div>
+      <div id="v-label" style="margin-top:10px">Oppretter samtale...</div>
+      <div id="v-fallback" style="display:none;margin-top:8px;text-align:center">
+        <div style="font-size:12px;margin-bottom:6px">Henger? Åpne direkte:</div>
+        <a id="v-link" href="#" target="_blank" style="color:var(--accent);font-size:12px;word-break:break-all">—</a>
+      </div>
+    </div>
+    <div id="daily-container"></div>
+  </div>
+
+  <div class="log-panel">
+    <div class="log-header">
+      <span class="log-header-title">Event-logg</span>
+      <span style="font-size:11px;color:var(--muted)" id="log-count">0</span>
+    </div>
+    <div class="log-list" id="log-list">
+      <div style="color:var(--muted);font-size:12px;text-align:center;margin-top:24px">Ingen events ennå</div>
+    </div>
+  </div>
+</div>
+
+<!-- =====================================================
+     INNSTILLINGER
+     ===================================================== -->
+<!-- =====================================================
+     DEBUG
+     ===================================================== -->
+<div class="tab-panel" id="panel-debug" style="flex-direction:column;overflow:hidden">
+
+  <!-- Toolbar -->
+  <div style="display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap">
+    <!-- Filters -->
+    <div style="display:flex;gap:4px;flex-wrap:wrap">
+      <button class="dbg-filter active" data-f="all"      onclick="setDebugFilter('all',this)">Alle</button>
+      <button class="dbg-filter"        data-f="error"    onclick="setDebugFilter('error',this)">🔴 Feil</button>
+      <button class="dbg-filter"        data-f="tool"     onclick="setDebugFilter('tool',this)">⚙ Tool calls</button>
+      <button class="dbg-filter"        data-f="mcp"      onclick="setDebugFilter('mcp',this)">🧠 MCP</button>
+      <button class="dbg-filter"        data-f="webhook"  onclick="setDebugFilter('webhook',this)">🤖 Webhook</button>
+      <button class="dbg-filter"        data-f="tavus"    onclick="setDebugFilter('tavus',this)">🎥 Tavus</button>
+      <button class="dbg-filter"        data-f="daily"    onclick="setDebugFilter('daily',this)">📡 Daily.js</button>
+    </div>
+    <input id="dbg-search" type="text" placeholder="Søk i logger..." oninput="renderDebugLog()"
+      style="flex:1;min-width:140px;background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:5px 10px;color:var(--text);font-size:12px;outline:none">
+    <!-- Actions -->
+    <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);cursor:pointer">
+      <input type="checkbox" id="dbg-autoscroll" checked> Auto-scroll
+    </label>
+    <button onclick="copyDebugLog()" style="background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--muted);padding:5px 11px;cursor:pointer;font-size:12px">📋 Kopier</button>
+    <button onclick="clearDebugLog()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);padding:5px 11px;cursor:pointer;font-size:12px">🗑 Tøm</button>
+  </div>
+
+  <!-- Stats bar -->
+  <div id="dbg-stats" style="display:flex;gap:16px;padding:6px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;color:var(--muted);flex-shrink:0">
+    <span>Totalt: <strong id="dbg-total">0</strong></span>
+    <span style="color:var(--red)">Feil: <strong id="dbg-errors">0</strong></span>
+    <span style="color:var(--purple)">Tool calls: <strong id="dbg-tools">0</strong></span>
+    <span style="color:var(--blue)">MCP: <strong id="dbg-mcps">0</strong></span>
+    <span style="color:var(--yellow)">Webhooks: <strong id="dbg-whs">0</strong></span>
+    <span style="margin-left:auto" id="dbg-session-time"></span>
+  </div>
+
+  <!-- Log entries -->
+  <div id="dbg-list" style="flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:6px;font-family:monospace;font-size:12px"></div>
+
+  <div id="dbg-empty" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);pointer-events:none;font-size:13px;flex-direction:column;gap:8px">
+    <span style="font-size:36px">🔍</span>
+    <span>Ingen debug-events ennå. Start en samtale.</span>
+  </div>
+</div>
+
+<div class="tab-panel" id="panel-innstillinger">
+
+  <!-- Sub-tabs -->
+  <div class="stabs">
+    <button class="stab-btn active" onclick="switchStab('tavus',this)">🔑 Tavus</button>
+    <button class="stab-btn" onclick="switchStab('llm',this)">🧠 LLM</button>
+    <button class="stab-btn" onclick="switchStab('tts',this)">🔊 Stemme (TTS)</button>
+    <button class="stab-btn" onclick="switchStab('stt',this)">🎤 Lytting (STT)</button>
+    <button class="stab-btn" onclick="switchStab('flyt',this)">💬 Samtaleflyt</button>
+    <button class="stab-btn" onclick="switchStab('integrasjoner',this)">🔗 Integrasjoner</button>
+  </div>
+
+  <div class="stab-panels">
+
+    <!-- ═══════════════════════════════════════════════
+         TAB: TAVUS
+         ═══════════════════════════════════════════════ -->
+    <div class="stab-panel active" id="stab-tavus">
+
+      <div class="section">
+        <div class="section-title"><span class="icon">🔑</span>API-tilkobling</div>
+        <div class="field">
+          <label>API-nøkkel <span class="badge accent">Påkrevd</span></label>
+          <input type="password" id="s-api-key" placeholder="599dd1df76c2...">
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Persona ID <span class="badge accent">Påkrevd</span></label>
+            <input type="text" id="s-persona-id" placeholder="pfe674c80016">
+          </div>
+          <div class="field">
+            <label>Replica ID</label>
+            <input type="text" id="s-replica-id" placeholder="rf4e9d9790f0">
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="icon">🎬</span>Persona-konfigurasjon</div>
+        <div class="field">
+          <label>Persona-navn</label>
+          <input type="text" id="s-persona-name" placeholder="Norsk AI-assistent">
+        </div>
+        <div class="field">
+          <label>Pipeline-modus</label>
+          <select id="s-pipeline-mode">
+            <option value="full">full – ny pipeline (anbefalt)</option>
+            <option value="legacy">legacy – gammel pipeline</option>
+          </select>
+          <div class="hint">«full» gir best ytelse og støtter alle nye funksjoner.</div>
+        </div>
+        <div class="field">
+          <label>Kontekstvindu (context_window_size)</label>
+          <select id="s-context-window">
+            <option value="">standard</option>
+            <option value="short">short – siste 5 meldinger</option>
+            <option value="medium">medium – siste 15 meldinger</option>
+            <option value="long">long – full historikk</option>
+          </select>
+          <div class="hint">Kontrollerer hvor mye samtalehistorikk LLM-en ser.</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="icon">📞</span>Samtale-egenskaper (per samtale)</div>
+        <div class="field-row">
+          <div class="field">
+            <label>Maks samtalelengde (sek)</label>
+            <input type="number" id="s-max-duration" placeholder="3600" min="60" max="86400">
+            <div class="hint">Standard: 3600 (1 time)</div>
+          </div>
+          <div class="field">
+            <label>Timeout deltaker borte (sek)</label>
+            <input type="number" id="s-absent-timeout" placeholder="300" min="10" max="3600">
+            <div class="hint">Avslutt hvis ingen møter opp</div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Timeout etter at deltaker forlot (sek)</label>
+          <input type="number" id="s-left-timeout" placeholder="60" min="0" max="600">
+          <div class="hint">Tid fra deltaker forlater til samtalen avsluttes</div>
+        </div>
+        <div class="field">
+          <label>Callback URL (Tavus events → din server)</label>
+          <input type="url" id="s-callback-url" placeholder="https://din-server.no/tavus-callback">
+          <div class="hint">Mottar events: conversation.started, conversation.ended, conversation.tool_call</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="icon">🎥</span>Opptak og visning</div>
+        <div class="toggle-row">
+          <label>Aktiver opptak (recording)</label>
+          <label class="toggle"><input type="checkbox" id="s-enable-recording"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <label>Aktiver transkripsjon (transcription)</label>
+          <label class="toggle"><input type="checkbox" id="s-enable-transcription"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <label>Greenscreen-bakgrunn</label>
+          <label class="toggle"><input type="checkbox" id="s-apply-greenscreen"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="field">
+          <label>Opptak S3-bøtte (valgfri)</label>
+          <input type="text" id="s-s3-bucket" placeholder="min-s3-bøtte">
+        </div>
+        <div class="field">
+          <label>S3-region</label>
+          <input type="text" id="s-s3-region" placeholder="eu-west-1">
+        </div>
+      </div>
+
+    </div><!-- /stab-tavus -->
+
+    <!-- ═══════════════════════════════════════════════
+         TAB: LLM
+         ═══════════════════════════════════════════════ -->
+    <div class="stab-panel" id="stab-llm">
+
+      <div class="section">
+        <div class="section-title"><span class="icon">🧠</span>Modellvalg</div>
+        <div class="field">
+          <label>Modell</label>
+          <select id="s-llm-model" onchange="toggleLlmFields()">
+            <optgroup label="Tavus-modeller (ingen ekstern nøkkel trengs)">
+              <option value="tavus-gpt-oss">tavus-gpt-oss (anbefalt)</option>
+              <option value="tavus-claude-haiku-4.5">tavus-claude-haiku-4.5</option>
+              <option value="tavus-gemini-2.5-flash">tavus-gemini-2.5-flash</option>
+              <option value="tavus-gpt-5.2">tavus-gpt-5.2</option>
+              <option value="tavus-gemini-3-flash">tavus-gemini-3-flash</option>
+            </optgroup>
+            <optgroup label="Utgåtte Tavus-modeller">
+              <option value="tavus-gpt-4.1">tavus-gpt-4.1 (deprecated)</option>
+              <option value="tavus-gpt-4o">tavus-gpt-4o (deprecated)</option>
+              <option value="tavus-gpt-4o-mini">tavus-gpt-4o-mini (deprecated)</option>
+            </optgroup>
+            <optgroup label="Egendefinert (krever base_url + api_key)">
+              <option value="custom">Egendefinert modell...</option>
+            </optgroup>
+          </select>
+        </div>
+        <div id="llm-custom-fields" style="display:none;flex-direction:column;gap:12px">
+          <div class="field">
+            <label>Base URL (OpenAI-kompatibel API)</label>
+            <input type="url" id="s-llm-base-url" placeholder="https://api.openai.com/v1">
+            <div class="hint">Eksempel Anthropic: <code>https://api.anthropic.com/v1</code></div>
+          </div>
+          <div class="field">
+            <label>Egendefinert modellnavn (hvis «custom» valgt)</label>
+            <input type="text" id="s-llm-custom-model" placeholder="mitt-modell-navn">
+          </div>
+        </div>
+        <div class="field">
+          <label>LLM API-nøkkel (hvis ikke Tavus-modell)</label>
+          <input type="password" id="s-llm-api-key" placeholder="sk-...">
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="icon">⚙️</span>Modell-parametere</div>
+        <div class="toggle-row">
+          <label>Spekulativ inferens – raskere respons (anbefalt)</label>
+          <label class="toggle"><input type="checkbox" id="s-speculative" checked><span class="toggle-slider"></span></label>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Temperature: <span id="s-temp-val">0.7</span></label>
+            <input type="range" id="s-temperature" min="0" max="2" step="0.05" value="0.7"
+              oninput="document.getElementById('s-temp-val').textContent=parseFloat(this.value).toFixed(2)">
+            <div class="hint">0 = deterministisk, 2 = kreativ</div>
+          </div>
+          <div class="field">
+            <label>Max tokens</label>
+            <input type="number" id="s-max-tokens" placeholder="500" min="50" max="4096">
+            <div class="hint">Maks tokens i ett svar. Tomt = standard.</div>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Top-P: <span id="s-topp-val">1.0</span></label>
+            <input type="range" id="s-top-p" min="0" max="1" step="0.05" value="1"
+              oninput="document.getElementById('s-topp-val').textContent=parseFloat(this.value).toFixed(2)">
+          </div>
+          <div class="field">
+            <label>Frequency penalty: <span id="s-freqp-val">0.0</span></label>
+            <input type="range" id="s-freq-penalty" min="-2" max="2" step="0.05" value="0"
+              oninput="document.getElementById('s-freqp-val').textContent=parseFloat(this.value).toFixed(2)">
+          </div>
+        </div>
+
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="icon">🛠</span>Registrerte verktøy</div>
+        <div class="hint" style="line-height:1.7">Verktøy som er registrert på personaen:</div>
+        <div id="tools-display" style="display:flex;flex-direction:column;gap:6px"></div>
+        <div class="hint" style="margin-top:4px">Verktøy sendes automatisk med når du trykker «Oppdater persona».</div>
+      </div>
+
+    </div><!-- /stab-llm -->
+
+    <!-- ═══════════════════════════════════════════════
+         TAB: TTS – STEMME
+         ═══════════════════════════════════════════════ -->
+    <div class="stab-panel" id="stab-tts">
+
+      <!-- Tydelig advarsel om push-krav -->
+      <div style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.35);border-radius:10px;padding:11px 15px;font-size:12px;color:var(--text);line-height:1.7;display:flex;align-items:center;justify-content:space-between;gap:12px">
+        <span>⚠️ Stemmeendringer trer i kraft først etter at du trykker <strong>Oppdater persona på Tavus</strong> og starter en <strong>ny samtale</strong>.</span>
+        <button onclick="saveAndPush()" style="flex-shrink:0;background:var(--accent);border:none;border-radius:7px;padding:7px 14px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">💾 Lagre & push nå</button>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="icon">🔊</span>TTS-motor</div>
+        <div class="field">
+          <label>Motor</label>
+          <select id="s-tts-engine" onchange="toggleTtsEngineFields()">
+            <option value="elevenlabs">ElevenLabs (anbefalt for norsk)</option>
+            <option value="tavus">Tavus Default</option>
+            <option value="cartesia">Cartesia</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- ElevenLabs -->
+      <div class="section" id="tts-el-section">
+        <div class="section-title"><span class="icon">⚡</span>ElevenLabs</div>
+        <div class="field">
+          <label>ElevenLabs API-nøkkel</label>
+          <input type="password" id="s-el-api-key" placeholder="sk_5c60ed04...">
+        </div>
+        <div class="field">
+          <label>Voice ID</label>
+          <div class="field-btn-row">
+            <input type="text" id="s-el-voice-id" placeholder="pbTfeim1PEXOqwziBfnC">
+            <button class="btn-save" style="padding:8px 14px;font-size:12px" onclick="previewVoice()">▶ Test</button>
+          </div>
+          <div class="hint">Finn ID på <a href="https://elevenlabs.io/app/voice-library" target="_blank" style="color:var(--accent)">ElevenLabs Voice Library</a> — klikk en stemme → «Use» → kopier ID fra URL eller «Voice ID»-feltet. Husk å teste med ▶ Test og deretter trykke <strong>Lagre &amp; push nå</strong> over.</div>
+        </div>
+        <div class="field">
+          <label>TTS-modell</label>
+          <select id="s-el-model">
+            <option value="eleven_flash_v2_5">eleven_flash_v2_5 – lavest latens, norsk ✓ (anbefalt)</option>
+            <option value="eleven_turbo_v2_5">eleven_turbo_v2_5 – rask, norsk ✓</option>
+            <option value="eleven_multilingual_v2">eleven_multilingual_v2 – best kvalitet, norsk ✓</option>
+            <option value="eleven_turbo_v2">eleven_turbo_v2 – hurtig, kun engelsk</option>
+            <option value="eleven_monolingual_v1">eleven_monolingual_v1 – kun engelsk</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- ElevenLabs Voice Settings -->
+      <div class="section" id="tts-el-voice-section">
+        <div class="section-title"><span class="icon">🎛</span>Stemme-parametere</div>
+        <div class="field-row">
+          <div class="field">
+            <label>Stability: <span id="s-el-stability-val">0.50</span></label>
+            <input type="range" id="s-el-stability" min="0" max="1" step="0.05" value="0.5"
+              oninput="document.getElementById('s-el-stability-val').textContent=parseFloat(this.value).toFixed(2)">
+            <div class="hint">Lav = mer variasjon, Høy = stabil</div>
+          </div>
+          <div class="field">
+            <label>Similarity boost: <span id="s-el-sim-val">0.75</span></label>
+            <input type="range" id="s-el-similarity" min="0" max="1" step="0.05" value="0.75"
+              oninput="document.getElementById('s-el-sim-val').textContent=parseFloat(this.value).toFixed(2)">
+            <div class="hint">Høy = likner mer originalstemmen</div>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Style: <span id="s-el-style-val">0.00</span></label>
+            <input type="range" id="s-el-style" min="0" max="1" step="0.05" value="0"
+              oninput="document.getElementById('s-el-style-val').textContent=parseFloat(this.value).toFixed(2)">
+            <div class="hint">Forsterker stemmens stil/karakter</div>
+          </div>
+          <div class="field">
+            <label>Talehastighet: <span id="s-el-speed-val">1.00</span>×</label>
+            <input type="range" id="s-el-speed" min="0.5" max="2.0" step="0.05" value="1.0"
+              oninput="document.getElementById('s-el-speed-val').textContent=parseFloat(this.value).toFixed(2)">
+            <div class="hint">1.0 = normal hastighet</div>
+          </div>
+        </div>
+        <div class="toggle-row">
+          <label>Speaker boost (forbedrer lydkvalitet)</label>
+          <label class="toggle"><input type="checkbox" id="s-el-speaker-boost" checked><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <label>Emotion control</label>
+          <label class="toggle"><input type="checkbox" id="s-el-emotion" checked><span class="toggle-slider"></span></label>
+        </div>
+      </div>
+
+      <!-- Cartesia -->
+      <div class="section" id="tts-cartesia-section" style="display:none">
+        <div class="section-title"><span class="icon">🔷</span>Cartesia</div>
+        <div class="field">
+          <label>Cartesia API-nøkkel</label>
+          <input type="password" id="s-cartesia-api-key" placeholder="sk_car_...">
+        </div>
+        <div class="field">
+          <label>Voice ID</label>
+          <input type="text" id="s-cartesia-voice-id" placeholder="Cartesia voice ID">
+        </div>
+        <div class="field">
+          <label>Modell</label>
+          <select id="s-cartesia-model">
+            <option value="sonic-2">sonic-2 (anbefalt)</option>
+            <option value="sonic">sonic</option>
+          </select>
+        </div>
+      </div>
+
+
+    </div><!-- /stab-tts -->
+
+    <!-- ═══════════════════════════════════════════════
+         TAB: STT – LYTTING
+         ═══════════════════════════════════════════════ -->
+    <div class="stab-panel" id="stab-stt">
+
+      <div class="section">
+        <div class="section-title"><span class="icon">🎤</span>STT-motor (tale-til-tekst)</div>
+        <div class="field">
+          <label>STT-motor</label>
+          <select id="s-stt-engine" onchange="toggleSttEngineFields()">
+            <option value="tavus-advanced">tavus-advanced (anbefalt)</option>
+            <option value="deepgram">Deepgram (manuell kontroll)</option>
+          </select>
+          <div class="hint">Tavus Advanced er optimert for lavest latens. Velg Deepgram for full språk- og modellkontroll.</div>
+        </div>
+      </div>
+
+      <!-- Deepgram -->
+      <div class="section" id="stt-deepgram-section">
+        <div class="section-title"><span class="icon">🔵</span>Deepgram-innstillinger</div>
+        <div class="field-row">
+          <div class="field">
+            <label>Modell</label>
+            <select id="s-dg-model">
+              <option value="nova-3">nova-3 (nyeste)</option>
+              <option value="nova-2">nova-2</option>
+              <option value="nova-2-general">nova-2-general</option>
+              <option value="nova-2-meeting">nova-2-meeting</option>
+              <option value="enhanced">enhanced</option>
+              <option value="base">base</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Språk</label>
+            <select id="s-dg-language">
+              <option value="no">Norsk (no)</option>
+              <option value="nb">Norsk bokmål (nb)</option>
+              <option value="nn">Nynorsk (nn)</option>
+              <option value="en">Engelsk (en)</option>
+              <option value="en-US">Engelsk US (en-US)</option>
+              <option value="de">Tysk (de)</option>
+              <option value="fr">Fransk (fr)</option>
+              <option value="es">Spansk (es)</option>
+              <option value="sv">Svensk (sv)</option>
+              <option value="da">Dansk (da)</option>
+              <option value="fi">Finsk (fi)</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Endpointing (ms) – pause for å avgjøre taleend</label>
+          <input type="number" id="s-dg-endpointing" placeholder="300" min="0" max="5000">
+          <div class="hint">Standard: 300ms. Lavere = raskere, mer aggressiv.</div>
+        </div>
+        <div class="toggle-row">
+          <label>Smart format (tall, valuta osv.)</label>
+          <label class="toggle"><input type="checkbox" id="s-dg-smart-format" checked><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <label>Punktuering</label>
+          <label class="toggle"><input type="checkbox" id="s-dg-punctuate" checked><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <label>Diarisering (hvem snakker)</label>
+          <label class="toggle"><input type="checkbox" id="s-dg-diarize"><span class="toggle-slider"></span></label>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="icon">⏱</span>Pause-deteksjon</div>
+        <div class="field-row">
+          <div class="field">
+            <label>Pause-sensitivitet: <span id="s-pause-sens-val">0.50</span></label>
+            <input type="range" id="s-pause-sensitivity" min="0" max="1" step="0.05" value="0.5"
+              oninput="document.getElementById('s-pause-sens-val').textContent=parseFloat(this.value).toFixed(2)">
+            <div class="hint">Høy = reagerer på korte pauser</div>
+          </div>
+          <div class="field">
+            <label>Pause-tid (ms)</label>
+            <input type="number" id="s-pause-time" placeholder="700" min="100" max="5000">
+            <div class="hint">Tid uten tale før turen er ferdig</div>
+          </div>
+        </div>
+        <div class="toggle-row">
+          <label>Smart turn detection</label>
+          <label class="toggle"><input type="checkbox" id="s-smart-turn" checked><span class="toggle-slider"></span></label>
+        </div>
+        <div class="field">
+          <label>Hotwords (kommaseparert)</label>
+          <input type="text" id="s-hotwords" placeholder="Tavus, Homey, smarthus">
+          <div class="hint">Ord som bør gjenkjennes mer nøyaktig</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="icon">👁</span>Persepsjon og syn</div>
+        <div class="field">
+          <label>Persepsjonsmodell</label>
+          <select id="s-perception-model">
+            <option value="raven-1">Raven-1 (anbefalt)</option>
+            <option value="raven-0">Raven-0</option>
+            <option value="off">Off – deaktiver persepsjon</option>
+          </select>
+          <div class="hint">Analyserer videobildene som brukeren ser.</div>
+        </div>
+        <div class="toggle-row">
+          <label>Aktiver syn (enable_vision)</label>
+          <label class="toggle"><input type="checkbox" id="s-enable-vision" checked><span class="toggle-slider"></span></label>
+        </div>
+        <div class="field">
+          <label>Ambient awareness queries (én per linje)</label>
+          <textarea id="s-ambient-queries" rows="4" placeholder="Er brukeren glad?&#10;Er det noe i bakgrunnen?"></textarea>
+          <div class="hint">Spørsmål som kontinuerlig analyseres mot videobildene.</div>
+        </div>
+      </div>
+
+    </div><!-- /stab-stt -->
+
+    <!-- ═══════════════════════════════════════════════
+         TAB: SAMTALEFLYT
+         ═══════════════════════════════════════════════ -->
+    <div class="stab-panel" id="stab-flyt">
+
+      <div class="section">
+        <div class="section-title"><span class="icon">💬</span>System-prompt og hilsen</div>
+        <div id="norsk-warning" style="display:none;background:rgba(234,179,8,.08);border:1px solid var(--yellow);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--yellow);line-height:1.6">
+          ⚠️ <strong>System-prompten mangler norsk-instruks!</strong> Personaen kan svare på engelsk. Legg til tekst som «Du snakker KUN norsk bokmål» eller bruk standardteksten.
+          <button onclick="resetSystemPrompt()" style="margin-left:10px;background:rgba(234,179,8,.15);border:1px solid var(--yellow);border-radius:5px;padding:2px 10px;color:var(--yellow);cursor:pointer;font-size:11px">Tilbakestill</button>
+        </div>
+        <div class="field">
+          <label>System-prompt (persona-instruksjoner)</label>
+          <textarea id="s-system-prompt" rows="10" placeholder="Du er en hjelpsom norsk AI-assistent..."
+            oninput="checkNorskWarning()"></textarea>
+          <div class="hint">Lagres på Tavus-personaen. <strong style="color:var(--green)">Husk å inkludere norsk-instruks!</strong></div>
+        </div>
+        <div class="field">
+          <label>Hilsen (personaen sier dette ved samtalestart)</label>
+          <textarea id="s-greeting" rows="3" placeholder="Hei! Jeg er din hjemmeassistent..."></textarea>
+        </div>
+        <div class="field">
+          <label>Samtalekontekst per samtale <span class="badge accent">🔒 Norsk låst</span></label>
+          <textarea id="s-conv-context" rows="3" placeholder="Tilleggsinstruksjoner per samtale..."></textarea>
+          <div class="hint">Sendes ved oppstart av hver samtale. <strong style="color:var(--accent)">Norsk-håndhevelse legges alltid til automatisk</strong> – uansett hva du skriver her.</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="icon">🔄</span>Turn detection</div>
+        <div class="field">
+          <label>Turn detection-modell</label>
+          <select id="s-turn-model">
+            <option value="sparrow-1">Sparrow-1 (anbefalt)</option>
+            <option value="time-based">Time-based</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Tålmodighet (turn-taking patience)</label>
+            <select id="s-patience">
+              <option value="low">low – reagerer raskt</option>
+              <option value="medium" selected>medium (standard)</option>
+              <option value="high">high – venter lengre</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Kan avbrytes (interruptibility)</label>
+            <select id="s-interruptibility">
+              <option value="low">low – vanskelig å avbryte</option>
+              <option value="medium" selected>medium (standard)</option>
+              <option value="high">high – lett å avbryte</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Sensitivity threshold: <span id="s-sens-val">0.50</span></label>
+            <input type="range" id="s-sensitivity" min="0" max="1" step="0.05" value="0.5"
+              oninput="document.getElementById('s-sens-val').textContent=parseFloat(this.value).toFixed(2)">
+            <div class="hint">Terskel for å oppdage taleslutt</div>
+          </div>
+          <div class="field">
+            <label>Interrupt sensitivity: <span id="s-intsens-val">0.50</span></label>
+            <input type="range" id="s-interrupt-sensitivity" min="0" max="1" step="0.05" value="0.5"
+              oninput="document.getElementById('s-intsens-val').textContent=parseFloat(this.value).toFixed(2)">
+          </div>
+        </div>
+        <div class="field">
+          <label>Silence detection timeout (ms)</label>
+          <input type="number" id="s-silence-timeout" placeholder="30000" min="1000" max="120000">
+          <div class="hint">Avslutt samtale etter X ms stillhet. Standard: 30000.</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="icon">🗣</span>Backchannel (lyttesignaler)</div>
+        <div class="toggle-row">
+          <label>Aktiver backchannel (mhm, ja, mm...)</label>
+          <label class="toggle"><input type="checkbox" id="s-backchannel"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="field">
+          <label>Backchannel-ord (kommaseparert)</label>
+          <input type="text" id="s-backchannel-words" placeholder="mhm, ja, ok, mmm, jeg forstår">
+          <div class="hint">Ord personaen bruker som lyttesignal mens brukeren snakker.</div>
+        </div>
+        <div class="field">
+          <label>Response frequency: <span id="s-respfreq-val">1.00</span></label>
+          <input type="range" id="s-response-frequency" min="0" max="2" step="0.1" value="1"
+            oninput="document.getElementById('s-respfreq-val').textContent=parseFloat(this.value).toFixed(2)">
+          <div class="hint">Høy = svar oftere og mer aktivt</div>
+        </div>
+      </div>
+
+    </div><!-- /stab-flyt -->
+
+    <!-- ═══════════════════════════════════════════════
+         TAB: INTEGRASJONER
+         ═══════════════════════════════════════════════ -->
+    <div class="stab-panel" id="stab-integrasjoner">
+
+      <div class="section">
+        <div class="section-title"><span class="icon">🤖</span>Webhook-agenter</div>
+        <div style="background:rgba(99,102,241,.07);border:1px solid var(--accent);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--text);line-height:1.7;margin-bottom:8px">
+          Hvert webhook du legger til blir automatisk et eget <strong>verktøy (tool)</strong> på Tavus-personaen.<br>
+          Personaen velger riktig agent basert på <strong>verktøynavnet</strong> og <strong>beskrivelsen</strong>.<br>
+          Forventet svar fra webhook: <code>{"speakable_response": "Svaret på norsk"}</code>
+        </div>
+        <div id="webhook-empty-warning" style="display:none;background:rgba(239,68,68,.08);border:1px solid var(--red);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--red);line-height:1.6;margin-bottom:8px">
+          ⚠️ <strong>Ingen webhooks konfigurert!</strong> Samtaleagenten vil ikke klare å svare på spørsmål som krever eksterne verktøy.<br>
+          <button onclick="autoMigrateWebhook()" style="margin-top:6px;background:rgba(239,68,68,.15);border:1px solid var(--red);border-radius:5px;padding:3px 12px;color:var(--red);cursor:pointer;font-size:11px">
+            🔄 Importer fra gammel n8n-URL
+          </button>
+        </div>
+        <div class="webhook-list" id="webhook-list"></div>
+        <button class="btn-add" style="margin-top:4px" onclick="addWebhook()">+ Legg til webhook-agent</button>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="icon">⚙️</span>Globale innstillinger for webhooks</div>
+        <div class="field">
+          <label>Standard Auth-header (brukes hvis ikke overstyrt per webhook)</label>
+          <input type="text" id="s-n8n-auth" placeholder="Bearer mitt-hemmelige-token">
+          <div class="hint">Legges til som <code>Authorization</code>-header hvis ikke webhook-kortet har sin egen.</div>
+        </div>
+        <div class="field">
+          <label>Timeout for svar (ms)</label>
+          <input type="number" id="s-tool-timeout" placeholder="10000" min="1000" max="60000">
+          <div class="hint">Maks ventetid på svar fra en webhook. Standard: 10 000 ms.</div>
+        </div>
+        <!-- hidden compat fields -->
+        <input type="hidden" id="s-n8n-url">
+        <input type="hidden" id="s-n8n-as-callback">
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="icon">🧠</span>MCP-servere</div>
+        <div class="hint" style="line-height:1.6;margin-bottom:4px">Legg til MCP-servere. Serveren som heter «Homey» kobles til <code>homey_tool</code> automatisk.</div>
+        <div class="mcp-list" id="mcp-list"></div>
+        <button class="btn-add" onclick="addMcpServer()">+ Legg til MCP-server</button>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="icon">📡</span>Tavus Callback</div>
+        <div class="field">
+          <label>Callback URL</label>
+          <input type="url" id="s-callback-url-2" placeholder="https://din-server.no/tavus-callback">
+          <div class="hint">Tavus sender POST til denne URL ved: <code>conversation.started</code>, <code>conversation.ended</code>, <code>conversation.tool_call</code></div>
+        </div>
+      </div>
+
+    </div><!-- /stab-integrasjoner -->
+
+  </div><!-- /stab-panels -->
+
+  <!-- Bottom actions -->
+  <div class="settings-actions">
+    <span class="save-msg" id="save-msg">✓ Lagret</span>
+    <button class="btn-save" onclick="saveSettings()">💾 Lagre lokalt</button>
+    <button class="btn-push" id="btn-push" onclick="pushPersonaToTavus()">🔄 Oppdater persona på Tavus</button>
+  </div>
+
+</div><!-- /panel-innstillinger -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ================================================================
+// STATE
+// ================================================================
+let dailyFrame = null;
+let conversationId = null;
+let logCount = 0;
+let lastUserUtterance = '';   // fallback når tool_arguments er tom
+const ICONS = { outgoing:'↗', incoming:'↙', tool_call:'⚙', n8n_request:'→', n8n_response:'←', error:'✗', info:'·' };
+
+// ================================================================
+// SETTINGS – getSettings / readForm / loadSettingsIntoForm
+// ================================================================
+function getSettings() {
+  return {
+    // Tavus
+    apiKey:         localStorage.getItem('tavus_api_key')       || '',
+    personaId:      localStorage.getItem('tavus_persona_id')    || '',
+    replicaId:      localStorage.getItem('tavus_replica_id')    || '',
+    personaName:    localStorage.getItem('persona_name')        || 'Norsk AI-assistent',
+    pipelineMode:   localStorage.getItem('pipeline_mode')       || 'full',
+    contextWindow:  localStorage.getItem('context_window')      || '',
+    // Samtale-egenskaper
+    maxDuration:    parseInt(localStorage.getItem('max_duration')    || '0') || null,
+    absentTimeout:  parseInt(localStorage.getItem('absent_timeout')  || '0') || null,
+    leftTimeout:    parseInt(localStorage.getItem('left_timeout')    || '0') || null,
+    callbackUrl:    localStorage.getItem('callback_url')        || '',
+    enableRecording:    localStorage.getItem('enable_recording')     === 'true',
+    enableTranscription: localStorage.getItem('enable_transcription') === 'true',
+    applyGreenscreen:   localStorage.getItem('apply_greenscreen')    === 'true',
+    s3Bucket:       localStorage.getItem('s3_bucket')           || '',
+    s3Region:       localStorage.getItem('s3_region')           || '',
+    // LLM
+    llmModel:       localStorage.getItem('llm_model')           || 'tavus-gpt-oss',
+    llmBaseUrl:     localStorage.getItem('llm_base_url')        || '',
+    llmCustomModel: localStorage.getItem('llm_custom_model')    || '',
+    llmApiKey:      localStorage.getItem('llm_api_key')         || '',
+    speculative:    localStorage.getItem('speculative')         === 'true',  // av som standard – forårsaker engelsk
+    temperature:    parseFloat(localStorage.getItem('temperature')   || '0.7'),
+    maxTokens:      parseInt(localStorage.getItem('max_tokens')      || '0') || null,
+    topP:           parseFloat(localStorage.getItem('top_p')         || '1'),
+    freqPenalty:    parseFloat(localStorage.getItem('freq_penalty')  || '0'),
+    // TTS
+    ttsEngine:      localStorage.getItem('tts_engine')          || 'elevenlabs',
+    elApiKey:       localStorage.getItem('el_api_key')          || '',
+    elVoiceId:      localStorage.getItem('el_voice_id')         || '',
+    elModel:        localStorage.getItem('el_model')            || 'eleven_flash_v2_5',
+    elStability:    parseFloat(localStorage.getItem('el_stability')  || '0.5'),
+    elSimilarity:   parseFloat(localStorage.getItem('el_similarity') || '0.75'),
+    elStyle:        parseFloat(localStorage.getItem('el_style')      || '0'),
+    elSpeed:        parseFloat(localStorage.getItem('el_speed')      || '1.0'),
+    elSpeakerBoost: localStorage.getItem('el_speaker_boost')    !== 'false',
+    elEmotion:      localStorage.getItem('el_emotion')          !== 'false',
+    cartesiaApiKey: localStorage.getItem('cartesia_api_key')    || '',
+    cartesiaVoiceId: localStorage.getItem('cartesia_voice_id')  || '',
+    cartesiaModel:  localStorage.getItem('cartesia_model')      || 'sonic-2',
+    openaiTtsApiKey: localStorage.getItem('openai_tts_api_key') || '',
+    openaiTtsVoice: localStorage.getItem('openai_tts_voice')    || 'nova',
+    openaiTtsModel: localStorage.getItem('openai_tts_model')    || 'tts-1',
+    // STT
+    sttEngine:      localStorage.getItem('stt_engine') === 'elevenlabs'
+                      ? 'tavus-advanced'   // migrate anyone who had EL STT
+                      : (localStorage.getItem('stt_engine') || 'tavus-advanced'),
+    dgModel:        localStorage.getItem('dg_model')            || 'nova-3',
+    dgLanguage:     localStorage.getItem('dg_language')         || 'no',
+    dgEndpointing:  parseInt(localStorage.getItem('dg_endpointing') || '300'),
+    dgSmartFormat:  localStorage.getItem('dg_smart_format')     !== 'false',
+    dgPunctuate:    localStorage.getItem('dg_punctuate')        !== 'false',
+    dgDiarize:      localStorage.getItem('dg_diarize')          === 'true',
+    pauseSensitivity: parseFloat(localStorage.getItem('pause_sensitivity') || '0.5'),
+    pauseTime:      parseInt(localStorage.getItem('pause_time') || '700'),
+    smartTurn:      localStorage.getItem('smart_turn')          !== 'false',
+    hotwords:       localStorage.getItem('hotwords')            || '',
+    // Perception
+    perceptionModel: localStorage.getItem('perception_model')   || 'raven-0',
+    enableVision:   localStorage.getItem('enable_vision')       !== 'false',
+    ambientQueries: localStorage.getItem('ambient_queries')     || '',
+    // Samtaleflyt
+    greeting:       localStorage.getItem('persona_greeting')    || 'Hei! Jeg er din hjemmeassistent. Jeg kan styre smarthuset ditt og svare på spørsmål. Hva kan jeg hjelpe deg med?',
+    systemPrompt:   localStorage.getItem('system_prompt')       || defaultSystemPrompt(),
+    convContext:    localStorage.getItem('conv_context')        || 'VIKTIG: Du skal alltid snakke norsk bokmål i denne samtalen.',
+    turnModel:      localStorage.getItem('turn_model')          || 'sparrow-1',
+    patience:       localStorage.getItem('patience')            || 'high',
+    interruptibility: localStorage.getItem('interruptibility')  || 'low',
+    sensitivity:    parseFloat(localStorage.getItem('sensitivity')    || '0.5'),
+    interruptSensitivity: parseFloat(localStorage.getItem('interrupt_sensitivity') || '0.5'),
+    silenceTimeout: parseInt(localStorage.getItem('silence_timeout') || '30000'),
+    backchannel:    localStorage.getItem('backchannel')         === 'true',
+    backchannelWords: localStorage.getItem('backchannel_words') || '',
+    responseFrequency: parseFloat(localStorage.getItem('response_frequency') || '1.0'),
+    // Integrasjoner
+    n8nUrl:         localStorage.getItem('tavus_n8n_url')       || '',  // compat
+    n8nAuth:        localStorage.getItem('n8n_auth')            || '',
+    toolTimeout:    parseInt(localStorage.getItem('tool_timeout') || '10000'),
+    mcpServers:     JSON.parse(localStorage.getItem('tavus_mcp_servers') || '[]'),
+    n8nAsCallback:  localStorage.getItem('n8n_as_callback')     === 'true',
+    webhooks:       JSON.parse(localStorage.getItem('tavus_webhooks') || '[]'),
+  };
+}
+
+function defaultSystemPrompt() {
+  return `SPRÅK: NORSK BOKMÅL. ALLTID. UTEN UNNTAK.
+Du skal ALDRI snakke, skrive eller tenke på engelsk. Ikke ett eneste engelsk ord.
+Selv om du er usikker – norsk bokmål. Selv om verktøysvar er på engelsk – oversett til norsk.
+Selv om brukeren snakker engelsk – svar på norsk bokmål.
+
+Du er en hjelpsom AI-assistent for hjemmet.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VERKTØY DU HAR:
+- homey_tool: Bruk for ALT som handler om smarthuset – lys, temperatur, enheter, scener, alarmer.
+- ask_tool: Bruk for all annen ekstern informasjon eller handlinger.
+
+VERKTØYREGLER:
+1. Alle argumenter til verktøy MÅ være på norsk bokmål – aldri engelsk.
+2. Vent stille på verktøysvaret – si INGENTING mens du venter.
+3. Svar kun basert på det faktiske verktøysvaret du mottar.
+4. Finn aldri opp svar – bruk alltid verktøyet.
+5. Oppsummer verktøyresultater kort og naturlig på norsk bokmål.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TONE: Vennlig, tydelig og konsis. Snakk som en hjelpsom nordmann.`;
+}
+
+function readForm() {
+  const llmModelSelect = document.getElementById('s-llm-model').value;
+  const llmModel = llmModelSelect === 'custom'
+    ? (document.getElementById('s-llm-custom-model').value.trim() || 'custom')
+    : llmModelSelect;
+  return {
+    apiKey:         v('s-api-key'),
+    personaId:      v('s-persona-id'),
+    replicaId:      v('s-replica-id'),
+    personaName:    v('s-persona-name'),
+    pipelineMode:   v('s-pipeline-mode'),
+    contextWindow:  v('s-context-window'),
+    maxDuration:    ni('s-max-duration'),
+    absentTimeout:  ni('s-absent-timeout'),
+    leftTimeout:    ni('s-left-timeout'),
+    callbackUrl:    v('s-callback-url'),
+    enableRecording:    cb('s-enable-recording'),
+    enableTranscription: cb('s-enable-transcription'),
+    applyGreenscreen:   cb('s-apply-greenscreen'),
+    s3Bucket:       v('s-s3-bucket'),
+    s3Region:       v('s-s3-region'),
+    llmModel,
+    llmBaseUrl:     v('s-llm-base-url'),
+    llmCustomModel: v('s-llm-custom-model'),
+    llmApiKey:      v('s-llm-api-key'),
+    speculative:    cb('s-speculative'),
+    temperature:    nf('s-temperature'),
+    maxTokens:      ni('s-max-tokens'),
+    topP:           nf('s-top-p'),
+    freqPenalty:    nf('s-freq-penalty'),
+    ttsEngine:      v('s-tts-engine'),
+    elApiKey:       v('s-el-api-key'),
+    elVoiceId:      v('s-el-voice-id'),
+    elModel:        v('s-el-model'),
+    elStability:    nf('s-el-stability'),
+    elSimilarity:   nf('s-el-similarity'),
+    elStyle:        nf('s-el-style'),
+    elSpeed:        nf('s-el-speed'),
+    elSpeakerBoost: cb('s-el-speaker-boost'),
+    elEmotion:      cb('s-el-emotion'),
+    cartesiaApiKey: v('s-cartesia-api-key'),
+    cartesiaVoiceId: v('s-cartesia-voice-id'),
+    cartesiaModel:  v('s-cartesia-model'),
+    openaiTtsApiKey: v('s-openai-tts-api-key'),
+    openaiTtsVoice: v('s-openai-tts-voice'),
+    openaiTtsModel: v('s-openai-tts-model'),
+    sttEngine:      v('s-stt-engine'),
+    dgModel:        v('s-dg-model'),
+    dgLanguage:     v('s-dg-language'),
+    dgEndpointing:  ni('s-dg-endpointing'),
+    dgSmartFormat:  cb('s-dg-smart-format'),
+    dgPunctuate:    cb('s-dg-punctuate'),
+    dgDiarize:      cb('s-dg-diarize'),
+    pauseSensitivity: nf('s-pause-sensitivity'),
+    pauseTime:      ni('s-pause-time'),
+    smartTurn:      cb('s-smart-turn'),
+    hotwords:       v('s-hotwords'),
+    perceptionModel: v('s-perception-model'),
+    enableVision:   cb('s-enable-vision'),
+    ambientQueries: v('s-ambient-queries'),
+    greeting:       v('s-greeting'),
+    systemPrompt:   v('s-system-prompt'),
+    convContext:    v('s-conv-context'),
+    turnModel:      v('s-turn-model'),
+    patience:       v('s-patience'),
+    interruptibility: v('s-interruptibility'),
+    sensitivity:    nf('s-sensitivity'),
+    interruptSensitivity: nf('s-interrupt-sensitivity'),
+    silenceTimeout: ni('s-silence-timeout'),
+    backchannel:    cb('s-backchannel'),
+    backchannelWords: v('s-backchannel-words'),
+    responseFrequency: nf('s-response-frequency'),
+    n8nUrl:         v('s-n8n-url'),
+    n8nAuth:        v('s-n8n-auth'),
+    toolTimeout:    ni('s-tool-timeout'),
+    mcpServers:     collectMcpServers(),
+    n8nAsCallback:  cb('s-n8n-as-callback'),
+    webhooks:       collectWebhooks(),
+  };
+}
+
+function v(id)  { return (document.getElementById(id)?.value || '').trim(); }
+function cb(id) { return document.getElementById(id)?.checked || false; }
+function nf(id) { const el=document.getElementById(id); return el ? parseFloat(el.value)||0 : 0; }
+function ni(id) { const el=document.getElementById(id); const n=parseInt(el?.value||''); return isNaN(n)||n===0?null:n; }
+function sv(id,val) { const el=document.getElementById(id); if(el) el.value=val??''; }
+function scb(id,val){ const el=document.getElementById(id); if(el) el.checked=!!val; }
+function sRange(id,spanId,val) {
+  const el=document.getElementById(id); const sp=document.getElementById(spanId);
+  if(el) el.value=val; if(sp) sp.textContent=parseFloat(val).toFixed(2);
+}
+
+function saveSettings() {
+  const s = readForm();
+  const map = {
+    tavus_api_key:s.apiKey, tavus_persona_id:s.personaId, tavus_replica_id:s.replicaId,
+    persona_name:s.personaName, pipeline_mode:s.pipelineMode, context_window:s.contextWindow,
+    max_duration:s.maxDuration||'', absent_timeout:s.absentTimeout||'', left_timeout:s.leftTimeout||'',
+    callback_url:s.callbackUrl, enable_recording:s.enableRecording, enable_transcription:s.enableTranscription,
+    apply_greenscreen:s.applyGreenscreen, s3_bucket:s.s3Bucket, s3_region:s.s3Region,
+    llm_model:s.llmModel, llm_base_url:s.llmBaseUrl, llm_custom_model:s.llmCustomModel, llm_api_key:s.llmApiKey,
+    speculative:s.speculative, temperature:s.temperature, max_tokens:s.maxTokens||'',
+    top_p:s.topP, freq_penalty:s.freqPenalty,
+    tts_engine:s.ttsEngine,
+    el_api_key:s.elApiKey, el_voice_id:s.elVoiceId, el_model:s.elModel,
+    el_stability:s.elStability, el_similarity:s.elSimilarity, el_style:s.elStyle,
+    el_speed:s.elSpeed, el_speaker_boost:s.elSpeakerBoost, el_emotion:s.elEmotion,
+    cartesia_api_key:s.cartesiaApiKey, cartesia_voice_id:s.cartesiaVoiceId, cartesia_model:s.cartesiaModel,
+    openai_tts_api_key:s.openaiTtsApiKey, openai_tts_voice:s.openaiTtsVoice, openai_tts_model:s.openaiTtsModel,
+    stt_engine:s.sttEngine,
+    dg_model:s.dgModel, dg_language:s.dgLanguage, dg_endpointing:s.dgEndpointing,
+    dg_smart_format:s.dgSmartFormat, dg_punctuate:s.dgPunctuate, dg_diarize:s.dgDiarize,
+    pause_sensitivity:s.pauseSensitivity, pause_time:s.pauseTime||'', smart_turn:s.smartTurn, hotwords:s.hotwords,
+    perception_model:s.perceptionModel, enable_vision:s.enableVision, ambient_queries:s.ambientQueries,
+    persona_greeting:s.greeting, system_prompt:s.systemPrompt, conv_context:s.convContext,
+    turn_model:s.turnModel, patience:s.patience, interruptibility:s.interruptibility,
+    sensitivity:s.sensitivity, interrupt_sensitivity:s.interruptSensitivity,
+    silence_timeout:s.silenceTimeout||'', backchannel:s.backchannel, backchannel_words:s.backchannelWords,
+    response_frequency:s.responseFrequency,
+    tavus_n8n_url:s.n8nUrl, n8n_auth:s.n8nAuth, tool_timeout:s.toolTimeout||'',
+    tavus_mcp_servers:JSON.stringify(s.mcpServers), n8n_as_callback:s.n8nAsCallback,
+    tavus_webhooks:JSON.stringify(s.webhooks),
+  };
+  Object.entries(map).forEach(([k,val]) => localStorage.setItem(k, val));
+  flash('save-msg', '✓ Lagret');
+}
+
+function loadSettingsIntoForm() {
+  const s = getSettings();
+  sv('s-api-key', s.apiKey);
+  sv('s-persona-id', s.personaId);
+  sv('s-replica-id', s.replicaId);
+  sv('s-persona-name', s.personaName);
+  sv('s-pipeline-mode', s.pipelineMode);
+  sv('s-context-window', s.contextWindow);
+  sv('s-max-duration', s.maxDuration||'');
+  sv('s-absent-timeout', s.absentTimeout||'');
+  sv('s-left-timeout', s.leftTimeout||'');
+  sv('s-callback-url', s.callbackUrl);
+  sv('s-callback-url-2', s.callbackUrl);
+  scb('s-enable-recording', s.enableRecording);
+  scb('s-enable-transcription', s.enableTranscription);
+  scb('s-apply-greenscreen', s.applyGreenscreen);
+  sv('s-s3-bucket', s.s3Bucket);
+  sv('s-s3-region', s.s3Region);
+  // LLM
+  const knownModels=['tavus-gpt-oss','tavus-claude-haiku-4.5','tavus-gemini-2.5-flash',
+    'tavus-gpt-5.2','tavus-gemini-3-flash',
+    'tavus-gpt-4.1','tavus-gpt-4o','tavus-gpt-4o-mini'];
+  sv('s-llm-model', knownModels.includes(s.llmModel) ? s.llmModel : 'custom');
+  sv('s-llm-base-url', s.llmBaseUrl);
+  sv('s-llm-custom-model', s.llmCustomModel);
+  sv('s-llm-api-key', s.llmApiKey);
+  scb('s-speculative', s.speculative);
+  sRange('s-temperature','s-temp-val', s.temperature);
+  sv('s-max-tokens', s.maxTokens||'');
+  sRange('s-top-p','s-topp-val', s.topP);
+  sRange('s-freq-penalty','s-freqp-val', s.freqPenalty);
+  toggleLlmFields();
+  // TTS
+  sv('s-tts-engine', s.ttsEngine);
+  sv('s-el-api-key', s.elApiKey);
+  sv('s-el-voice-id', s.elVoiceId);
+  sv('s-el-model', s.elModel);
+  sRange('s-el-stability','s-el-stability-val', s.elStability);
+  sRange('s-el-similarity','s-el-sim-val', s.elSimilarity);
+  sRange('s-el-style','s-el-style-val', s.elStyle);
+  sRange('s-el-speed','s-el-speed-val', s.elSpeed);
+  scb('s-el-speaker-boost', s.elSpeakerBoost);
+  scb('s-el-emotion', s.elEmotion);
+  sv('s-cartesia-api-key', s.cartesiaApiKey);
+  sv('s-cartesia-voice-id', s.cartesiaVoiceId);
+  sv('s-cartesia-model', s.cartesiaModel);
+  sv('s-openai-tts-api-key', s.openaiTtsApiKey);
+  sv('s-openai-tts-voice', s.openaiTtsVoice);
+  sv('s-openai-tts-model', s.openaiTtsModel);
+  toggleTtsEngineFields();
+  // STT
+  sv('s-stt-engine', s.sttEngine);
+  sv('s-dg-model', s.dgModel);
+  sv('s-dg-language', s.dgLanguage);
+  sv('s-dg-endpointing', s.dgEndpointing||'');
+  scb('s-dg-smart-format', s.dgSmartFormat);
+  scb('s-dg-punctuate', s.dgPunctuate);
+  scb('s-dg-diarize', s.dgDiarize);
+  sRange('s-pause-sensitivity','s-pause-sens-val', s.pauseSensitivity);
+  sv('s-pause-time', s.pauseTime||'');
+  scb('s-smart-turn', s.smartTurn);
+  sv('s-hotwords', s.hotwords);
+  sv('s-perception-model', s.perceptionModel);
+  scb('s-enable-vision', s.enableVision);
+  sv('s-ambient-queries', s.ambientQueries);
+  // Samtaleflyt
+  sv('s-greeting', s.greeting);
+  sv('s-system-prompt', s.systemPrompt);
+  sv('s-conv-context', s.convContext);
+  sv('s-turn-model', s.turnModel);
+  sv('s-patience', s.patience);
+  sv('s-interruptibility', s.interruptibility);
+  sRange('s-sensitivity','s-sens-val', s.sensitivity);
+  sRange('s-interrupt-sensitivity','s-intsens-val', s.interruptSensitivity);
+  sv('s-silence-timeout', s.silenceTimeout||'');
+  scb('s-backchannel', s.backchannel);
+  sv('s-backchannel-words', s.backchannelWords);
+  sRange('s-response-frequency','s-respfreq-val', s.responseFrequency);
+  // Integrasjoner
+  sv('s-n8n-url', s.n8nUrl);
+  sv('s-n8n-auth', s.n8nAuth);
+  sv('s-tool-timeout', s.toolTimeout||'');
+  renderMcpList(s.mcpServers);
+  scb('s-n8n-as-callback', s.n8nAsCallback);
+  // Migrate legacy n8nUrl to webhooks if webhooks list is empty
+  let whs = s.webhooks;
+  if (!whs.length && s.n8nUrl) {
+    whs = [{ name:'ask_tool', url:s.n8nUrl, description:'Henter ekstern informasjon og utfører handlinger via n8n.', auth:'' }];
+  }
+  renderWebhookList(whs);
+  renderToolsDisplay();
+  checkNorskWarning();
+}
+
+function checkNorskWarning() {
+  const prompt = (document.getElementById('s-system-prompt')?.value || '').toLowerCase();
+  const hasNorsk = prompt.includes('norsk') || prompt.includes('norwegian') || prompt.includes('bokmål');
+  const w = document.getElementById('norsk-warning');
+  if (w) w.style.display = hasNorsk ? 'none' : 'block';
+}
+function resetSystemPrompt() {
+  const el = document.getElementById('s-system-prompt');
+  if (el) { el.value = defaultSystemPrompt(); checkNorskWarning(); }
+}
+
+function toggleLlmFields() {
+  const val = document.getElementById('s-llm-model').value;
+  const el = document.getElementById('llm-custom-fields');
+  const show = val === 'custom';
+  el.style.display = show ? 'flex' : 'none';
+  el.style.flexDirection = 'column';
+  el.style.gap = '12px';
+}
+
+function toggleTtsEngineFields() {
+  const eng = document.getElementById('s-tts-engine').value;
+  document.getElementById('tts-el-section').style.display       = eng === 'elevenlabs' ? '' : 'none';
+  document.getElementById('tts-el-voice-section').style.display = eng === 'elevenlabs' ? '' : 'none';
+  document.getElementById('tts-cartesia-section').style.display = eng === 'cartesia'   ? '' : 'none';
+}
+
+function toggleSttEngineFields() {
+  const eng = document.getElementById('s-stt-engine').value;
+  document.getElementById('stt-deepgram-section').style.display = eng === 'deepgram' ? '' : 'none';
+}
+
+function syncCallbackUrl() {
+  if (document.getElementById('s-n8n-as-callback').checked) {
+    const n8n = document.getElementById('s-n8n-url').value;
+    document.getElementById('s-callback-url').value = n8n;
+    document.getElementById('s-callback-url-2').value = n8n;
+  }
+}
+
+function renderToolsDisplay() {
+  const el = document.getElementById('tools-display');
+  const s = getSettings();
+  const tools = [];
+  // Active webhook tools only
+  s.webhooks.filter(wh => wh.enabled !== false && wh.name).forEach(wh => {
+    tools.push({ name: wh.name, desc: wh.description || wh.url || '—', icon:'🤖' });
+  });
+  // Active MCP tools
+  const homeyEnabled = s.mcpServers.some(m =>
+    m.enabled !== false && (m.name.toLowerCase().includes('homey') || m.url.includes('3000/mcp'))
+  );
+  if (homeyEnabled) tools.push({ name:'homey_tool', desc:'Smarthus-kontroll via Homey MCP', icon:'🏠' });
+
+  if (!tools.length) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--muted)">Ingen verktøy konfigurert ennå. Legg til webhooks under Integrasjoner.</div>';
+    return;
+  }
+  el.innerHTML = tools.map(t => `
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 12px;display:flex;align-items:center;gap:10px">
+      <span style="font-size:16px">${t.icon}</span>
+      <div style="min-width:0">
+        <div style="font-size:12px;font-weight:600;color:var(--accent);font-family:monospace">${esc(t.name)}</div>
+        <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.desc)}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ================================================================
+// BUILD TTS LAYER OBJECT
+// ================================================================
+function buildTtsLayer(s) {
+  const eng = s.ttsEngine;
+  if (eng === 'elevenlabs') {
+    const obj = {
+      tts_engine: 'elevenlabs',
+      api_key: s.elApiKey,
+      external_voice_id: s.elVoiceId,
+      tts_model_name: s.elModel,
+      tts_emotion_control: s.elEmotion,
+      voice_settings: {
+        stability: s.elStability,
+        similarity_boost: s.elSimilarity,
+        style: s.elStyle,
+        use_speaker_boost: s.elSpeakerBoost,
+      },
+    };
+    if (s.elSpeed !== 1.0) obj.experimental_controls = { speed: s.elSpeed };
+    return obj;
+  }
+  if (eng === 'cartesia') {
+    return {
+      tts_engine: 'cartesia',
+      api_key: s.cartesiaApiKey,
+      external_voice_id: s.cartesiaVoiceId,
+      tts_model_name: s.cartesiaModel,
+    };
+  }
+  if (eng === 'openai') {
+    return {
+      tts_engine: 'openai',
+      api_key: s.openaiTtsApiKey,
+      external_voice_id: s.openaiTtsVoice,
+      tts_model_name: s.openaiTtsModel,
+    };
+  }
+  return { tts_engine: 'tavus' };
+}
+
+// ================================================================
+// TOOL DEFINITIONS
+// ================================================================
+function makeHomeyToolDef() {
+  // Én konsistent def for homey_tool – bruker 'query' som eneste required-felt
+  // slik at LLM alltid sender hele kommandoen i args.query
+  return {
+    type: 'function',
+    function: {
+      name: 'homey_tool',
+      description: 'Kontroller smarthuset via Homey. Bruk for ALT som handler om lys, temperatur, enheter, scener, alarmer og hjemmeautomasjon. Send hele kommandoen på norsk i "query".',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Hele kommandoen på norsk bokmål, f.eks. "slå på alle lysene i stuen" eller "sett temperaturen på kjøkkenet til 22 grader"',
+          },
+        },
+        required: ['query'],
+      },
+    },
+  };
+}
+
+// ================================================================
+// PUSH PERSONA TO TAVUS
+// ================================================================
+async function saveAndPush() {
+  saveSettings();
+  await pushPersonaToTavus();
+}
+
+async function pushPersonaToTavus() {
+  saveSettings();
+  const s = getSettings();
+  if (!s.apiKey || !s.personaId) {
+    showToast('Fyll inn API-nøkkel og Persona ID under Tavus-fanen', 'error'); return;
+  }
+  const btn = document.getElementById('btn-push');
+  btn.disabled = true; btn.textContent = '⏳ Oppdaterer...';
+
+  const effectiveModel = s.llmModel === 'custom' ? s.llmCustomModel : s.llmModel;
+
+  // Build tool definitions – only enabled webhooks and MCP servers
+  const toolDefs = [];
+  const activeWebhooks = s.webhooks.filter(wh => wh.enabled !== false && wh.name && wh.url);
+
+  // Sjekk om en webhook er smarthus-relatert (brukes til å gi riktig homey_tool-def)
+  const isHomeyWebhook = (wh) => /homey|smarthus|smart.?hus|lights?|lys|hjem/i.test(wh.name + ' ' + (wh.description||''));
+  const hasHomeyTool = activeWebhooks.some(w => w.name === 'homey_tool');
+  const hasHomeyWebhook = activeWebhooks.some(isHomeyWebhook);
+
+  activeWebhooks.forEach(wh => {
+    // Smarthus-webhooks som ikke heter 'homey_tool' – legg til BEGGE: sitt eget navn + homey_tool alias
+    const isHomey = isHomeyWebhook(wh) && wh.name !== 'homey_tool';
+
+    toolDefs.push({
+      type: 'function',
+      function: {
+        name: wh.name,
+        description: wh.description ||
+          (isHomey ? 'Kontroller smarthuset via Homey. Bruk for lys, temperatur, enheter, scener og alt som handler om hjemmeautomasjon.'
+                   : `Bruk ${wh.name} for å hente informasjon eller utføre handlinger.`),
+        parameters: {
+          type: 'object',
+          properties: {
+            query:  { type:'string', description:'Spørsmålet eller instruksen på norsk bokmål' },
+            action: { type:'string', description:'Handlingen som skal utføres (valgfri)' },
+          },
+          required: ['query'],
+        },
+      },
+    });
+
+    // Legg til homey_tool som alias hvis dette er en Homey-webhook med annet navn
+    if (isHomey && !hasHomeyTool) {
+      toolDefs.push(makeHomeyToolDef());
+    }
+  });
+  // MCP tools – include homey_tool only if an enabled Homey MCP server exists AND no webhook already provides it
+  const homeyEnabled = s.mcpServers.some(m =>
+    m.enabled !== false && (m.name.toLowerCase().includes('homey') || m.url.includes('3000/mcp'))
+  );
+  const homeyToolAlreadyDefined = toolDefs.some(t => t.function?.name === 'homey_tool');
+  if (homeyEnabled && !homeyToolAlreadyDefined) toolDefs.push(makeHomeyToolDef());
+
+  // Erstatt direkte homey_tool-webhook-def med konsistent versjon (query som required)
+  const idx = toolDefs.findIndex(t => t.function?.name === 'homey_tool');
+  if (idx >= 0) toolDefs[idx] = makeHomeyToolDef();
+
+  addLog('info', `Bygger verktøyliste: ${toolDefs.map(t=>t.function.name).join(', ') || '(ingen)'}`, {});
+
+  // Use 'add' – works on both existing and non-existing fields
+  const p = (path, value) => ({ op:'add', path, value });
+
+  // ── KJERNEFELTER – kun felt som er 100% støttet av Tavus PATCH ──────────
+  // TTS og STT patching er fjernet – disse har ugyldig felt-navn og forårsaker 500.
+  // Oppdater TTS/STT direkte i Tavus-dashboardet hvis nødvendig.
+  const patches = [
+    p('/system_prompt', s.systemPrompt),
+    p('/greeting',      s.greeting),
+    p('/pipeline_mode', s.pipelineMode),
+    p('/layers/llm/model', effectiveModel),
+    p('/layers/llm/tools', toolDefs),
+  ];
+
+  // ── VALGFRIE FELTER ───────────────────────────────────────────────────────
+  if (s.personaName)   patches.push(p('/persona_name',        s.personaName));
+  if (s.contextWindow) patches.push(p('/context_window_size', s.contextWindow));
+  if (s.llmApiKey)     patches.push(p('/layers/llm/api_key',  s.llmApiKey));
+  if (s.llmBaseUrl)    patches.push(p('/layers/llm/base_url', s.llmBaseUrl));
+
+  // ── LOG PATCHES TIL DEBUG FØR SENDING ────────────────────────────────────
+  dbgLog('tavus', `PATCH: ${patches.length} operasjoner sendes`, {
+    persona_id: s.personaId,
+    patches: patches.map(p => ({ op:p.op, path:p.path, valueType: typeof p.value, valuePreview: JSON.stringify(p.value)?.slice(0,80) })),
+  });
+
+  try {
+    const res = await fetch(`https://tavusapi.com/v2/personas/${s.personaId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type':'application/json', 'x-api-key': s.apiKey },
+      body: JSON.stringify(patches),
+    });
+    const rawText = await res.text();
+    let data = {};
+    try { data = JSON.parse(rawText); } catch {
+      throw new Error(`HTTP ${res.status} – Tavus returnerte ugyldig respons. Sjekk API-nøkkel og Persona ID under Tavus-fanen. (Svar starter med: ${rawText.slice(0,60).replace(/\n/g,' ')})`);
+    }
+    if (!res.ok) {
+      dbgLog('tavus', `PATCH HTTP ${res.status} – detaljert svar`, { status: res.status, body: data }, true);
+      throw new Error(`HTTP ${res.status}: ${data.message || data.error || data.detail || JSON.stringify(data).slice(0,200)}`);
+    }
+    showToast(`✓ Persona «${data.persona_name || s.personaId}» oppdatert!`, 'success');
+    flash('save-msg', '✓ Oppdatert på Tavus');
+    addLog('info', 'Persona oppdatert på Tavus', { patches: patches.length });
+    dbgLog('tavus', `Persona PATCH OK: ${data.persona_name || s.personaId}`, { patches_sent: patches.length, tools: toolDefs.map(t=>t.function?.name) });
+  } catch (e) {
+    showToast('Feil: ' + e.message, 'error');
+    addLog('error', 'Persona-oppdatering feilet', { error: e.message });
+    dbgLog('tavus', 'Persona PATCH FEIL: ' + e.message, { error: e.message, patches_sent: patches.length }, true);
+  } finally {
+    btn.disabled = false; btn.textContent = '🔄 Oppdater persona på Tavus';
+  }
+}
+
+// ================================================================
+// DEFAULTS  (versjonsstyrt – oppdateres selv for eksisterende brukere)
+// ================================================================
+const SETTINGS_VERSION = '13';  // øk for å tvinge re-initialisering
+
+function initDefaults() {
+  const isNew = !localStorage.getItem('tavus_api_key');
+  const needsUpdate = localStorage.getItem('settings_version') !== SETTINGS_VERSION;
+
+  if (isNew) {
+    localStorage.setItem('tavus_api_key',    '599dd1df76c24a559628cbb351c997b2');
+    localStorage.setItem('tavus_persona_id', 'pfe674c80016');
+    localStorage.setItem('tavus_replica_id', 'rf4e9d9790f0');
+    localStorage.setItem('el_api_key',       'sk_5c60ed04f1d10ebd647f4eabb46e9ef1fdc8c75e36b65ec2');
+    localStorage.setItem('el_voice_id',      'pbTfeim1PEXOqwziBfnC');
+    localStorage.setItem('tavus_mcp_servers', JSON.stringify([
+      { name:'Homey Smarthus', url:'https://oleandre.app.n8n.cloud/mcp/homey-mcp', enabled:true }
+    ]));
+    localStorage.setItem('persona_greeting', 'Hei! Jeg er din hjemmeassistent. Jeg kan styre smarthuset ditt og svare på spørsmål. Hva kan jeg hjelpe deg med?');
+  }
+
+  // Disse oppdateres alltid ved ny versjon (norsk-håndhevelse osv.)
+  if (isNew || needsUpdate) {
+    localStorage.setItem('el_model',         'eleven_flash_v2_5');
+    localStorage.setItem('dg_language',      'no');
+    localStorage.setItem('stt_engine',       'tavus-advanced');
+    // Tålmodighet: agenten venter lengre og er vanskeligere å avbryte
+    localStorage.setItem('patience',         'high');
+    localStorage.setItem('interruptibility', 'low');
+    localStorage.setItem('speculative',      'false');  // av – forårsaker engelske svar
+    localStorage.setItem('conv_context',
+      'KRITISK INSTRUKS: Du skal utelukkende kommunisere på norsk bokmål i hele denne samtalen. ' +
+      'Svar aldri på engelsk eller andre språk – ikke engang deler av setninger. ' +
+      'Hvis du mottar engelske verktøysvar, oversett og oppsummer dem på norsk bokmål.');
+    localStorage.setItem('system_prompt', defaultSystemPrompt());
+
+    // Migrer gammel lokal MCP-URL til n8n cloud-URL
+    const existingMcp = JSON.parse(localStorage.getItem('tavus_mcp_servers') || '[]');
+    const updatedMcp = existingMcp.map(m => {
+      if (m.url && (m.url.includes('92.221.70.95') || m.url.includes('3000/mcp'))) {
+        return { ...m, url: 'https://oleandre.app.n8n.cloud/mcp/homey-mcp' };
+      }
+      return m;
+    });
+    if (JSON.stringify(updatedMcp) !== JSON.stringify(existingMcp)) {
+      localStorage.setItem('tavus_mcp_servers', JSON.stringify(updatedMcp));
+    }
+
+    // Migrer gammel n8n-URL til webhook-liste hvis den finnes
+    const oldN8nUrl = localStorage.getItem('tavus_n8n_url');
+    const existingWebhooks = JSON.parse(localStorage.getItem('tavus_webhooks') || '[]');
+    if (oldN8nUrl && !existingWebhooks.length) {
+      localStorage.setItem('tavus_webhooks', JSON.stringify([
+        { name:'ask_tool', url:oldN8nUrl, description:'Henter ekstern informasjon og utfører handlinger via n8n.', auth:'' }
+      ]));
+    }
+
+    localStorage.setItem('settings_version', SETTINGS_VERSION);
+  }
+}
+
+// ================================================================
+// WEBHOOK UI
+// ================================================================
+let webhooks = [];
+
+function autoMigrateWebhook() {
+  const oldUrl = localStorage.getItem('tavus_n8n_url');
+  if (oldUrl) {
+    webhooks = [{ name:'ask_tool', url:oldUrl, description:'Henter ekstern informasjon og utfører handlinger via n8n.', auth:'' }];
+    renderWebhookList(webhooks);
+    showToast('✓ Importert ask_tool fra gammel n8n-URL', 'success');
+  } else {
+    addWebhook();
+  }
+}
+
+function renderWebhookList(list) {
+  webhooks = list || [];
+  const el = document.getElementById('webhook-list');
+  if (!el) return;
+  const warn = document.getElementById('webhook-empty-warning');
+  if (warn) warn.style.display = webhooks.length === 0 ? 'block' : 'none';
+  el.innerHTML = '';
+  webhooks.forEach((wh, i) => {
+    const enabled = wh.enabled !== false;
+    const card = document.createElement('div');
+    card.className = 'webhook-card';
+    card.id = `wh-card-${i}`;
+    card.style.opacity = enabled ? '1' : '0.45';
+    card.innerHTML = `
+      <div class="webhook-card-header">
+        <span style="font-size:16px">🤖</span>
+        <input type="text" placeholder="Verktøynavn (f.eks. ask_tool, vær_agent)" value="${esc(wh.name)}"
+          oninput="webhooks[${i}].name=this.value" style="font-family:monospace">
+        <label class="toggle" title="${enabled ? 'Aktiv' : 'Inaktiv'}">
+          <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleWebhook(${i},this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+        <button class="btn-remove" onclick="removeWebhook(${i})" title="Fjern">×</button>
+      </div>
+      <div class="webhook-url-row">
+        <input type="url" placeholder="https://..." value="${esc(wh.url)}" oninput="webhooks[${i}].url=this.value">
+        <button class="btn-test-wh" onclick="testWebhook(${i})">▶ Test</button>
+      </div>
+      <div class="webhook-desc">
+        <input type="text" placeholder="Beskrivelse for AI: hva gjør denne agenten? (norsk)" value="${esc(wh.description)}"
+          oninput="webhooks[${i}].description=this.value">
+      </div>
+      <div class="webhook-auth-row">
+        <label>Auth:</label>
+        <input type="text" placeholder="Bearer token (valgfri)" value="${esc(wh.auth||'')}"
+          oninput="webhooks[${i}].auth=this.value">
+      </div>
+      <div style="font-size:11px;color:var(--muted)" id="wh-status-${i}">
+        ${enabled
+          ? `<span style="color:var(--green)">● Aktiv</span> – verktøyet <strong>${esc(wh.name||'?')}</strong> legges til på Tavus-personaen`
+          : `<span style="color:var(--muted)">○ Inaktiv</span> – utelates fra Tavus-personaen`}
+      </div>`;
+    el.appendChild(card);
+  });
+}
+
+function toggleWebhook(i, enabled) {
+  webhooks[i].enabled = enabled;
+  const card = document.getElementById(`wh-card-${i}`);
+  const status = document.getElementById(`wh-status-${i}`);
+  if (card) card.style.opacity = enabled ? '1' : '0.45';
+  if (status) status.innerHTML = enabled
+    ? `<span style="color:var(--green)">● Aktiv</span> – verktøyet <strong>${esc(webhooks[i].name||'?')}</strong> legges til på Tavus-personaen`
+    : `<span style="color:var(--muted)">○ Inaktiv</span> – utelates fra Tavus-personaen`;
+}
+
+function addWebhook() {
+  webhooks.push({ name:'', url:'', description:'', auth:'' });
+  renderWebhookList(webhooks);
+  // Focus the name input of the new card
+  const cards = document.querySelectorAll('.webhook-card');
+  if (cards.length) cards[cards.length-1].querySelector('input').focus();
+}
+
+function removeWebhook(i) {
+  webhooks.splice(i, 1);
+  renderWebhookList(webhooks);
+}
+
+function collectWebhooks() {
+  return webhooks.filter(w => w.name && w.url);
+}
+
+async function testWebhook(i) {
+  const wh = webhooks[i];
+  if (!wh?.url) { showToast('Ingen URL satt', 'error'); return; }
+  const s = getSettings();
+  const headers = { 'Content-Type':'application/json' };
+  const auth = wh.auth || s.n8nAuth;
+  if (auth) headers['Authorization'] = auth;
+  showToast(`Tester ${wh.name || wh.url}...`, 'info');
+  try {
+    const res = await fetch(wh.url, { method:'POST', headers,
+      body: JSON.stringify({
+        question: 'Hei, dette er en test fra Tavus-dashbordet.',
+      }) });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    showToast('✓ Svar: ' + (d.speakable_response || JSON.stringify(d)).slice(0, 90), 'success');
+  } catch (e) { showToast('Feil: ' + e.message, 'error'); }
+}
+
+// ================================================================
+// MCP UI
+// ================================================================
+let mcpServers = [];
+function renderMcpList(servers) {
+  mcpServers = servers || [];
+  const el = document.getElementById('mcp-list');
+  if (!el) return;
+  el.innerHTML = '';
+  mcpServers.forEach((s, i) => {
+    const enabled = s.enabled !== false;
+    const card = document.createElement('div');
+    card.className = 'mcp-card' + (enabled ? '' : ' disabled');
+    card.id = `mcp-card-${i}`;
+    card.innerHTML = `
+      <div class="mcp-card-row">
+        <input class="mcp-name-input" type="text" placeholder="Navn (f.eks. Homey)" value="${esc(s.name)}"
+          oninput="mcpServers[${i}].name=this.value">
+        <label class="toggle" title="${enabled ? 'Aktiv – klikk for å deaktivere' : 'Inaktiv – klikk for å aktivere'}">
+          <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleMcp(${i},this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+        <button class="btn-remove" onclick="removeMcpServer(${i})" title="Fjern">×</button>
+      </div>
+      <div class="mcp-card-row">
+        <input type="url" placeholder="MCP URL  (http://...)" value="${esc(s.url)}"
+          oninput="mcpServers[${i}].url=this.value">
+        <button class="btn-test-mcp" onclick="testMcpServer(${i})">▶ Test</button>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">
+        ${enabled ? '<span style="color:var(--green)">● Aktiv</span>' : '<span style="color:var(--muted)">○ Inaktiv</span>'}
+        – verktøyet ${enabled ? 'legges til' : 'utelates'} på Tavus-personaen
+      </div>`;
+    el.appendChild(card);
+  });
+}
+
+function toggleMcp(i, enabled) {
+  mcpServers[i].enabled = enabled;
+  const card = document.getElementById(`mcp-card-${i}`);
+  if (card) {
+    card.className = 'mcp-card' + (enabled ? '' : ' disabled');
+    const statusEl = card.querySelector('div[style*="font-size:11px"]');
+    if (statusEl) statusEl.innerHTML = enabled
+      ? '<span style="color:var(--green)">● Aktiv</span> – verktøyet legges til på Tavus-personaen'
+      : '<span style="color:var(--muted)">○ Inaktiv</span> – verktøyet utelates på Tavus-personaen';
+  }
+}
+
+async function testMcpServer(i) {
+  const mcp = mcpServers[i];
+  if (!mcp?.url) { showToast('Ingen URL satt', 'error'); return; }
+  showToast(`Tester ${mcp.name || mcp.url}...`, 'info');
+  try {
+    const r = await fetch(mcp.url, {
+      method: 'POST',
+      headers: MCP_HEADERS,
+      body: JSON.stringify({ jsonrpc:'2.0', id:1, method:'initialize',
+        params:{ protocolVersion:'2024-11-05', capabilities:{}, clientInfo:{name:'status-check',version:'1'} } }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (r.ok) {
+      const d = await parseMcpResponse(r);
+      const name = d?.result?.serverInfo?.name || 'MCP-server';
+      showToast(`✓ ${mcp.name || 'MCP'}: tilkoblet (${name})`, 'success');
+      addLog('info', `MCP test OK: ${mcp.name}`, { server: name });
+      dbgLog('mcp', `Test OK: ${mcp.name} → ${name}`, { server_info: d?.result?.serverInfo });
+    } else {
+      showToast(`${mcp.name}: HTTP ${r.status}`, 'error');
+      dbgLog('mcp', `Test feilet: ${mcp.name} – HTTP ${r.status}`, { status: r.status }, true);
+    }
+  } catch (e) {
+    showToast(`${mcp.name}: ${e.name === 'TimeoutError' ? 'timeout (5s)' : e.message}`, 'error');
+    dbgLog('mcp', `Test feilet: ${mcp.name} – ${e.message}`, { error: e.message }, true);
+  }
+}
+
+function addMcpServer()     { mcpServers.push({name:'', url:'', enabled:true}); renderMcpList(mcpServers); }
+function removeMcpServer(i) { mcpServers.splice(i,1); renderMcpList(mcpServers); }
+function collectMcpServers() {
+  return mcpServers.filter(s => s.name || s.url);
+}
+function getHomeyMcpUrl() {
+  const s = getSettings();
+  const h = s.mcpServers.find(m =>
+    m.enabled !== false &&
+    (m.name.toLowerCase().includes('homey') || m.url.includes('3000/mcp'))
+  );
+  return h?.url || null;
+}
+
+// ================================================================
+// TABS
+// ================================================================
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.getElementById('panel-'+name).classList.add('active');
+  if (name === 'innstillinger') loadSettingsIntoForm();
+  if (name === 'debug') { updateDebugStats(); renderDebugLog(); }
+}
+function switchStab(name, btn) {
+  document.querySelectorAll('.stab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.stab-panel').forEach(p => p.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.getElementById('stab-'+name).classList.add('active');
+}
+
+// ================================================================
+// STATUS + TOAST + LOG
+// ================================================================
+function setStatus(status, label) {
+  document.getElementById('status-dot').className = 'dot ' + status;
+  document.getElementById('status-label').textContent = label;
+}
+let toastTimer;
+function showToast(msg, type='info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast show ' + type;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 4000);
+}
+function flash(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg; el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2800);
+}
+function addLog(type, label, data) {
+  const list = document.getElementById('log-list');
+  const empty = list.querySelector('[style*="Ingen events"]');
+  if (empty) empty.remove();
+  logCount++;
+  document.getElementById('log-count').textContent = logCount;
+  const time = new Date().toLocaleTimeString('nb-NO');
+  const icon = ICONS[type] || '·';
+  const hasData = data && Object.keys(data).length > 0;
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${type}`;
+  entry.innerHTML = `
+    <div class="log-row">
+      <span class="log-icon ${type}" style="font-family:monospace;flex-shrink:0">${icon}</span>
+      <span class="log-label">${esc(label)}</span>
+      <span class="log-time">${time}</span>
+    </div>
+    ${hasData ? `<details class="log-data"><summary>data</summary><pre>${esc(JSON.stringify(data,null,2))}</pre></details>` : ''}`;
+  list.appendChild(entry);
+  list.scrollTop = list.scrollHeight;
+}
+function clearLog() {
+  document.getElementById('log-list').innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center;margin-top:24px">Ingen events ennå</div>';
+  logCount = 0; document.getElementById('log-count').textContent = 0;
+}
+function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+
+// ================================================================
+// START SAMTALE
+// ================================================================
+async function startConversation() {
+  const s = getSettings();
+  if (!s.apiKey || !s.personaId) {
+    showToast('Mangler API-nøkkel eller Persona ID – gå til Innstillinger', 'error'); return;
+  }
+  setStatus('starting', 'Starter...');
+  document.getElementById('btn-start').disabled = true;
+  document.getElementById('v-idle').style.display = 'none';
+  document.getElementById('v-starting').style.display = 'flex';
+  document.getElementById('v-label').textContent = 'Oppretter samtale...';
+
+  addLog('outgoing', 'Oppretter Tavus-samtale', { persona_id: s.personaId });
+  dbgLog('tavus', 'POST /v2/conversations', { persona_id: s.personaId, replica_id: s.replicaId||'(standard)' });
+
+  try {
+    // Norsk håndheves alltid – brukerens kontekst legges til, men norsk-regelen kan ikke fjernes
+    const NORSK_LOCK =
+      'ABSOLUTT KRAV: Kommuniser KUN på norsk bokmål i hele samtalen. ' +
+      'Aldri svar på engelsk eller andre språk, heller ikke deler av svar. ' +
+      'Oversett alltid engelske verktøysvar til norsk bokmål før du svarer brukeren.';
+    const userContext = s.convContext ? s.convContext.trim() : '';
+    const fullContext = userContext
+      ? `${NORSK_LOCK}\n\n${userContext}`
+      : NORSK_LOCK;
+
+    const body = {
+      persona_id: s.personaId,
+      conversational_context: fullContext,
+    };
+    if (s.replicaId) body.replica_id = s.replicaId;
+
+    // Conversation properties
+    const props = {};
+    if (s.maxDuration)    props.max_call_duration = s.maxDuration;
+    if (s.absentTimeout)  props.participant_absent_timeout = s.absentTimeout;
+    if (s.leftTimeout)    props.participant_left_timeout   = s.leftTimeout;
+    if (s.enableRecording)     props.enable_recording     = true;
+    if (s.enableTranscription) props.enable_transcription = true;
+    if (s.applyGreenscreen)    props.apply_greenscreen    = true;
+    if (s.s3Bucket)  props.recording_s3_bucket_name = s.s3Bucket;
+    if (s.s3Region)  props.recording_s3_bucket_region = s.s3Region;
+    const cbUrl = s.n8nAsCallback ? s.n8nUrl : s.callbackUrl;
+    if (cbUrl) props.callback_url = cbUrl;
+    if (Object.keys(props).length) body.properties = props;
+
+    const res = await fetch('https://tavusapi.com/v2/conversations', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'x-api-key': s.apiKey },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) { const e=await res.text(); throw new Error(`Tavus ${res.status}: ${e}`); }
+    const data = await res.json();
+    conversationId = data.conversation_id;
+
+    addLog('incoming', 'Samtale opprettet ✓', { conversation_id: conversationId });
+    dbgLog('tavus', 'Samtale opprettet ✓', { conversation_id: conversationId, url: data.conversation_url?.slice(0,60)+'...' });
+    document.getElementById('conv-id-display').textContent = conversationId;
+    document.getElementById('conv-id-row').style.display = 'block';
+
+    await joinConversation(data.conversation_url);
+    document.getElementById('btn-stop').style.display = 'block';
+    document.getElementById('btn-start').style.display = 'none';
+
+  } catch (err) {
+    const msg = err.message || 'Ukjent feil';
+    addLog('error', 'Feil ved oppstart', { message: msg });
+    dbgLog('tavus', 'Feil ved samtaleoppstart: ' + msg, { error: msg }, true);
+    setStatus('error', 'Feil');
+    showToast(msg, 'error');
+    document.getElementById('btn-start').disabled = false;
+    document.getElementById('v-idle').style.display = 'flex';
+    document.getElementById('v-starting').style.display = 'none';
+  }
+}
+
+// ================================================================
+// JOIN – rå iframe for video + separat createCallObject for tool calls
+// ================================================================
+async function joinConversation(url) {
+  document.getElementById('v-label').textContent = 'Kobler til video...';
+  const fallbackTimer = setTimeout(() => {
+    document.getElementById('v-link').href = url;
+    document.getElementById('v-link').textContent = url;
+    document.getElementById('v-fallback').style.display = 'block';
+  }, 5000);
+
+  const container = document.getElementById('daily-container');
+  container.innerHTML = '';
+
+  // ── Video: alltid rå iframe (pålitelig, ingen API-avhengighet) ──
+  const iframe = document.createElement('iframe');
+  iframe.src = url;
+  iframe.allow = 'camera *; microphone *; fullscreen *; display-capture *; speaker *; autoplay *';
+  iframe.style.cssText = 'width:100%;height:100%;border:none;';
+  container.appendChild(iframe);
+
+  clearTimeout(fallbackTimer);
+  document.getElementById('v-starting').style.display = 'none';
+  setStatus('active', 'Aktiv');
+  addLog('info', 'Video åpnet ✓', { url });
+  dbgLog('daily', 'Video iframe åpnet ✓', { url: url?.slice(0,80)+'...' });
+
+  // ── Tool calls: separat headless Daily.js callObject ──
+  startDailyListener(url);
+}
+
+async function startDailyListener(url) {
+  if (typeof window.DailyIframe === 'undefined') {
+    addLog('info', 'Daily.js ikke lastet – tool calls via callback_url', {});
+    dbgLog('daily', 'Daily.js ikke tilgjengelig', { tip: 'Tool calls virker ikke uten Daily.js' }, true);
+    return;
+  }
+  try {
+    if (dailyFrame) { try { await dailyFrame.leave(); } catch {} try { await dailyFrame.destroy(); } catch {} dailyFrame = null; }
+
+    // Headless call object (ingen kamera/mikrofon fra dette objektet) – kun for å lytte
+    const call = window.DailyIframe.createCallObject({ audioSource: false, videoSource: false });
+    dailyFrame = call;
+
+    call.on('joined-meeting', () => {
+      addLog('info', 'Daily.js lytter aktiv ✓', {});
+      dbgLog('daily', 'Daily.js joined-meeting – tool call lytter klar ✓', {});
+    });
+
+    call.on('app-message', evt => {
+      const d = evt.data;
+      if (!d?.event_type) return;
+
+      if (d.event_type === 'conversation.tool_call') {
+        addLog('tool_call', 'Tool call rådata', d);
+        dbgLog('tool', 'Tool call mottatt: ' + (d.properties?.tool_name || d.properties?.name || '?'), {
+          tool_name:       d.properties?.tool_name,
+          name:            d.properties?.name,
+          tool_call_id:    d.properties?.tool_call_id,
+          tool_arguments:  d.properties?.tool_arguments,
+          arguments:       d.properties?.arguments,
+          raw_event:       d,
+        });
+        handleToolCall(d);
+      } else if (d.event_type === 'conversation.utterance') {
+        const role = d.properties?.role || d.role;
+        const text = d.properties?.transcript || d.properties?.text || d.transcript || '';
+        if (role === 'user' && text) { lastUserUtterance = text; dbgLog('daily', 'Bruker sa: ' + text.slice(0,80), { role, text }); }
+        if (text) addTranscriptLine(role, text);
+        addLog('incoming', 'Tavus: ' + d.event_type, d.properties || {});
+      } else {
+        const p = d.properties || {};
+        const eventText = p.transcript || p.text || p.content || p.message || p.output || '';
+        if (d.event_type === 'conversation.echo' || d.event_type === 'conversation.transcription') {
+          const role = p.role || (d.event_type.includes('replica') ? 'replica' : 'user');
+          if (eventText) addTranscriptLine(role, eventText);
+          dbgLog('daily', `${d.event_type}: "${eventText.slice(0,80)}"`, p);
+        } else if (d.event_type === 'conversation.replica.stopped_speaking') {
+          if (eventText) addTranscriptLine('replica', eventText);
+          dbgLog('daily', `replica stoppet: "${eventText.slice(0,80)}"`, p);
+        } else if (d.event_type === 'conversation.user.stopped_speaking') {
+          if (eventText) { addTranscriptLine('user', eventText); lastUserUtterance = eventText; }
+          dbgLog('daily', `bruker stoppet: "${eventText.slice(0,80)}"`, p);
+        } else {
+          addLog('incoming', 'Tavus: ' + d.event_type, p);
+          dbgLog('daily', 'Daily event: ' + d.event_type, Object.keys(p).length ? p : d);
+        }
+      }
+    });
+
+    call.on('error', e => {
+      addLog('info', 'Daily lytter feilet', {});
+      dbgLog('daily', 'Daily.js error', { error: e?.errorMsg || e }, true);
+    });
+
+    await Promise.race([
+      call.join({ url }),
+      new Promise((_, r) => setTimeout(() => r(), 15000)),
+    ]);
+  } catch (err) {
+    addLog('info', 'Daily.js lytter ikke tilgjengelig', {});
+    dbgLog('daily', 'startDailyListener feilet: ' + err?.message, { error: err?.message }, true);
+  }
+}
+
+// ================================================================
+// STOP
+// ================================================================
+async function stopConversation() {
+  if (dailyFrame) { try { await dailyFrame.leave(); } catch {} }
+  document.getElementById('daily-container').innerHTML = '';
+  document.getElementById('v-idle').style.display = 'flex';
+  document.getElementById('v-idle').querySelector('div:last-child').textContent = 'Samtalen er avsluttet';
+  document.getElementById('btn-stop').style.display = 'none';
+  document.getElementById('btn-start').style.display = 'block';
+  document.getElementById('btn-start').disabled = false;
+  document.getElementById('conv-id-row').style.display = 'none';
+  conversationId = null;
+  setStatus('ended', 'Avsluttet');
+  addLog('info', 'Samtale avsluttet', {});
+}
+
+// ================================================================
+// MCP JSON-RPC  (støtter både vanlig JSON og n8n SSE-format)
+// ================================================================
+
+// n8n MCP svarer med SSE (text/event-stream): "event: message\ndata: {...}\n\n"
+// Denne funksjonen henter ut JSON fra begge formater
+async function parseMcpResponse(res) {
+  const text = await res.text();
+  // SSE-format: finn første "data: {...}" linje
+  const dataLine = text.split('\n').find(l => l.startsWith('data:'));
+  if (dataLine) {
+    try { return JSON.parse(dataLine.slice(5).trim()); } catch {}
+  }
+  // Vanlig JSON
+  try { return JSON.parse(text); } catch {}
+  return { error: { code: -1, message: 'Kunne ikke parse MCP-svar: ' + text.slice(0, 200) } };
+}
+
+const MCP_HEADERS = {
+  'Content-Type': 'application/json',
+  'Accept': 'application/json, text/event-stream',
+};
+
+async function callMcpTool(mcpUrl, toolName, args) {
+  // 1. Initialize
+  const initRes = await fetch(mcpUrl, { method:'POST', headers:MCP_HEADERS, body:JSON.stringify({
+    jsonrpc:'2.0', id:1, method:'initialize',
+    params:{ protocolVersion:'2024-11-05', capabilities:{}, clientInfo:{name:'tavus-dashboard',version:'1.0'} }
+  })});
+
+  // MERK: Nettleseren blokkerer lesing av 'mcp-session-id' header med CORS
+  // med mindre serveren sender Access-Control-Expose-Headers: mcp-session-id
+  // Prøver likevel begge headernavnene:
+  const sessionId = initRes.headers.get('mcp-session-id')
+                 || initRes.headers.get('Mcp-Session-Id')
+                 || initRes.headers.get('X-Session-Id');
+
+  const initText = await initRes.text();
+
+  // Prøv å hente session ID fra SSE-data hvis headeren ikke er tilgjengelig
+  let sessionIdFromBody = null;
+  if (!sessionId) {
+    const dataLine = initText.split('\n').find(l => l.startsWith('data:'));
+    if (dataLine) {
+      try {
+        const parsed = JSON.parse(dataLine.slice(5).trim());
+        sessionIdFromBody = parsed?.result?.sessionId || parsed?.sessionId || null;
+      } catch {}
+    }
+  }
+
+  const effectiveSessionId = sessionId || sessionIdFromBody;
+
+  let initData;
+  try {
+    const dataLine = initText.split('\n').find(l => l.startsWith('data:'));
+    initData = dataLine ? JSON.parse(dataLine.slice(5).trim()) : JSON.parse(initText);
+  } catch { initData = {}; }
+
+  if (!initRes.ok || initData?.error) {
+    throw new Error('MCP initialize feilet: ' + (initData?.error?.message || initRes.status));
+  }
+
+  dbgLog('mcp', `Initialize OK – session: ${effectiveSessionId || '⚠ CORS blokkerte header'}`, {
+    session_id: effectiveSessionId,
+    cors_blocked: !effectiveSessionId,
+    server: initData?.result?.serverInfo?.name,
+    tip: !effectiveSessionId ? 'n8n må sende Access-Control-Expose-Headers: mcp-session-id for at nettleseren skal kunne lese session-ID' : ''
+  });
+
+  if (!effectiveSessionId) {
+    throw new Error(
+      'MCP session-ID ikke tilgjengelig (CORS). ' +
+      'Løsning: Legg til Homey som webhook-agent i stedet for MCP. ' +
+      'Se Integrasjoner → Webhook-agenter.'
+    );
+  }
+
+  const callH = { ...MCP_HEADERS, 'mcp-session-id': effectiveSessionId };
+
+  // 2. notifications/initialized
+  await fetch(mcpUrl, { method:'POST', headers:callH,
+    body:JSON.stringify({ jsonrpc:'2.0', method:'notifications/initialized' })
+  });
+
+  // 3. tools/call
+  const callRes = await fetch(mcpUrl, { method:'POST', headers:callH, body:JSON.stringify({
+    jsonrpc:'2.0', id:2, method:'tools/call', params:{ name:toolName, arguments:args }
+  })});
+  return parseMcpResponse(callRes);
+}
+
+// ================================================================
+// TOOL CALL ROUTER
+// ================================================================
+async function handleToolCall(event) {
+  const props = event.properties || {};
+  const toolName = props.tool_name || props.name || 'ask_tool';
+
+  // Ekstraher tool_call_id – Tavus sender dette og vi MÅ sende det tilbake
+  const toolCallId = props.tool_call_id || props.id || props.call_id || null;
+
+  // Parse tool_arguments – prøv alle kjente felt-navn Tavus kan bruke
+  let args = {};
+  const rawArgs = props.tool_arguments ?? props.arguments ?? props.parameters ?? props.input ?? '{}';
+  try {
+    args = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : (rawArgs || {});
+  } catch {}
+
+  addLog('tool_call', `Tool call: ${toolName}`, { args, raw: rawArgs });
+  dbgLog('tool', `Ruting tool call: ${toolName}`, {
+    tool_name: toolName,
+    tool_call_id: toolCallId,
+    args_parsed: args,
+    args_raw: rawArgs,
+    args_empty: Object.keys(args).length === 0,
+    lastUserUtterance: lastUserUtterance?.slice(0,60),
+    conversation_id: event.conversation_id || conversationId,
+    full_properties: props,
+  });
+  const convId = event.conversation_id || conversationId;
+  const s = getSettings();
+
+  // ── homey_tool → webhook (primær) eller MCP (fallback) ──
+  if (toolName === 'homey_tool') {
+    // Hent kommandoen fra ALLE mulige felt LLM-en kan bruke
+    const homeyInput =
+      args.query   ||   // LLM bruker 'query' (required-feltet i tool def)
+      args.command ||
+      args.action  ||
+      args.input   ||
+      [args.device, args.value].filter(Boolean).join(' ') ||
+      lastUserUtterance ||
+      'ukjent kommando';
+
+    // Primær: finn webhook for Homey – eksakt navn 'homey_tool', deretter Homey/smarthus i navn/beskrivelse, deretter første aktive
+    const activeWh = s.webhooks.filter(w => w.enabled !== false && w.url);
+    const homeyWebhook =
+      activeWh.find(w => w.name === 'homey_tool') ||
+      activeWh.find(w => /homey|smarthus|smart.?hus|lights?|lys|hjem/i.test(w.name + ' ' + (w.description||''))) ||
+      activeWh[0];   // fallback til første aktive webhook
+
+    dbgLog('webhook', `homey_tool routing → ${homeyWebhook ? homeyWebhook.name : 'ingen webhook funnet'}`, {
+      aktive_webhooks: activeWh.map(w=>w.name),
+      valgt: homeyWebhook?.name,
+      homeyInput,
+      args_raw: args,
+    });
+    if (homeyWebhook) {
+      const headers = { 'Content-Type':'application/json' };
+      if (homeyWebhook.auth || s.n8nAuth) headers['Authorization'] = homeyWebhook.auth || s.n8nAuth;
+      // Send fullstendig payload – n8n kan bruke 'question', 'query', eller 'args'
+      const homeyPayload = {
+        question: homeyInput,   // hovedkommando
+        query:    homeyInput,   // alias
+        command:  homeyInput,   // alias
+        args,                   // alle rå args fra LLM (action, device, value osv.)
+        tool_name: toolName,
+      };
+      addLog('n8n_request', `→ homey_tool webhook: ${homeyInput}`, homeyPayload);
+      dbgLog('webhook', `→ homey_tool: ${homeyInput}`, { url: homeyWebhook.url, payload: homeyPayload, tool_call_id: toolCallId });
+      try {
+        const res = await fetch(homeyWebhook.url, { method:'POST', headers, body: JSON.stringify(homeyPayload) });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const result = await res.json();
+        const text = result.speakable_response || result.output || result.result || result.message || args.response_to_user || 'Ferdig.';
+        addLog('n8n_response', 'Homey svar', { text });
+        dbgLog('webhook', '← homey_tool svar: ' + text.slice(0,80), { result, tool_call_id: toolCallId });
+        respondToTavus(convId, text, toolCallId);
+      } catch (e) {
+        addLog('error', 'homey_tool feilet: ' + e.message, {});
+        dbgLog('webhook', 'homey_tool FEIL: ' + e.message, { error: e.message }, true);
+        respondToTavus(convId, args.response_to_user || 'Beklager, jeg fikk ikke kontakt med smarthuset.', toolCallId);
+      }
+      return;
+    }
+
+    // Fallback: MCP direkte (krever Access-Control-Expose-Headers: mcp-session-id)
+    const homeyUrl = getHomeyMcpUrl();
+    if (!homeyUrl) {
+      dbgLog('mcp', 'Ingen homey_tool webhook og ingen MCP-URL konfigurert', {
+        tip: 'Legg til webhook med navn "homey_tool" under Integrasjoner → Webhook-agenter'
+      }, true);
+      respondToTavus(convId, args.response_to_user || 'Smarthus-integrasjonen er ikke konfigurert.', toolCallId);
+      return;
+    }
+    addLog('n8n_request', `→ Homey MCP: ${homeyInput}`, args);
+    dbgLog('mcp', `→ Homey MCP (fallback): ${homeyInput}`, { url: homeyUrl });
+    try {
+      const r = await callMcpTool(homeyUrl, 'Homey_Control_Tool', { input: homeyInput });
+      if (r?.error) throw new Error('MCP feil: ' + (r.error.message || JSON.stringify(r.error)));
+      const content = r?.result?.content;
+      let text = '';
+      if (Array.isArray(content)) {
+        const rawText = content.map(c => c.text || '').join(' ').trim();
+        try {
+          const parsed = JSON.parse(rawText);
+          text = Array.isArray(parsed)
+            ? parsed.map(i => i.output || i.text || i.result || '').join(' ')
+            : (parsed?.output || parsed?.text || parsed?.result || rawText);
+        } catch { text = rawText; }
+      }
+      if (!text || text.startsWith('[') || text.startsWith('{')) text = args.response_to_user || 'Ferdig.';
+      addLog('n8n_response', 'Homey MCP svar', { text });
+      dbgLog('mcp', '← Homey MCP svar: ' + text.slice(0,80), {});
+      respondToTavus(convId, text, toolCallId);
+    } catch (e) {
+      addLog('error', 'Homey MCP feilet: ' + e.message, {});
+      dbgLog('mcp', 'Homey MCP FEIL: ' + e.message, {
+        tip: e.message.includes('session-ID') ? '💡 Legg til "homey_tool" webhook under Integrasjoner for å omgå CORS.' : ''
+      }, true);
+      respondToTavus(convId, args.response_to_user || 'Beklager, jeg fikk ikke kontakt med smarthuset.', toolCallId);
+    }
+    return;
+  }
+
+  // ── Webhook-agenter (dynamisk routing etter tool name) ──
+  const activeWebhooks = s.webhooks.filter(w => w.enabled !== false);
+  // 1. Eksakt match på navn
+  let target = activeWebhooks.find(w => w.name === toolName);
+  // 2. Smarthus-relatert webhook som fallback for homey-lignende kall
+  if (!target) target = activeWebhooks.find(w => /homey|smarthus|smart.?hus|lights?|lys|hjem/i.test(w.name));
+  // 3. Første aktive webhook
+  if (!target && activeWebhooks.length) target = activeWebhooks[0];
+  // 4. Legacy n8nUrl
+  const targetUrl = target?.url || s.n8nUrl;
+
+  if (!targetUrl) {
+    addLog('error', `Ingen webhook for «${toolName}»`, {});
+    showToast(`Mangler webhook for «${toolName}» – legg til i Integrasjoner`, 'error');
+    respondToTavus(convId, 'Beklager, jeg har ikke tilkobling akkurat nå.', toolCallId);
+    return;
+  }
+  if (!target) target = { name: toolName, url: targetUrl, description: '', auth: '' };
+
+  const headers = { 'Content-Type':'application/json' };
+  const auth = target?.auth || s.n8nAuth;
+  if (auth) headers['Authorization'] = auth;
+
+  // Hent spørsmålet fra args (prøv alle mulige felt-navn) eller siste bruker-ytring
+  const question =
+    args.query    ||
+    args.question ||
+    args.action   ||
+    args.task     ||
+    args.input    ||
+    args.text     ||
+    args.message  ||
+    (Object.keys(args).length ? JSON.stringify(args) : null) ||
+    lastUserUtterance ||
+    '';
+
+  if (!question) {
+    addLog('error', `${toolName}: ingen spørsmålstekst`, { args });
+    respondToTavus(convId, 'Beklager, jeg fikk ikke med meg spørsmålet ditt. Kan du gjenta?', toolCallId);
+    return;
+  }
+
+  // Send fullstendig payload: question + alle rå args fra LLM
+  const payload = {
+    question,             // hoved-tekst
+    query: question,      // alias
+    command: question,    // alias
+    args,                 // alle rå args fra LLM
+    tool_name: toolName,
+    language: 'norwegian',
+  };
+  addLog('n8n_request', `→ ${target.name}: ${question}`, payload);
+  dbgLog('webhook', `→ ${target.name}: ${question.slice(0,80)}`, {
+    tool_name: toolName, webhook_name: target.name, url: targetUrl, tool_call_id: toolCallId,
+    args_raw: args, question_source: args.query ? 'args.query' : args.action ? 'args.action' : 'lastUserUtterance',
+  });
+
+  const timeout = s.toolTimeout || 10000;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    const res = await fetch(targetUrl, { method:'POST', headers, body:JSON.stringify(payload), signal:controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`Webhook svarte ${res.status}`);
+    const result = await res.json();
+    const replyText = result.speakable_response || result.output || result.result || result.message || 'Ferdig.';
+    addLog('n8n_response', `✓ ${toolName} svar`, result);
+    dbgLog('webhook', `← ${target.name} svar: ${replyText.slice(0,80)}`, { full_response: result, tool_call_id: toolCallId });
+    respondToTavus(convId, replyText, toolCallId);
+  } catch (e) {
+    addLog('error', `${toolName} feilet: ` + e.message, {});
+    dbgLog('webhook', `${target.name} FEIL: ${e.message}`, {
+      error: e.message, error_type: e.name, url: targetUrl,
+      tip: e.name === 'AbortError' ? `Timeout etter ${timeout}ms – øk Tool timeout i Integrasjoner` : ''
+    }, true);
+    respondToTavus(convId, 'Beklager, jeg kunne ikke hente den informasjonen akkurat nå.', toolCallId);
+  }
+}
+
+function respondToTavus(convId, text, toolCallId) {
+  if (!dailyFrame) {
+    dbgLog('tavus', 'respondToTavus: dailyFrame er null – kan ikke sende svar!', { text: text?.slice(0,80) }, true);
+    return;
+  }
+  try {
+    // Tavus CVI krever 'conversation.tool_result' med tool_call_id for verktøy-svar
+    if (toolCallId) {
+      const msg = {
+        message_type: 'conversation',
+        event_type:   'conversation.tool_result',
+        conversation_id: convId,
+        properties: {
+          tool_call_id: toolCallId,
+          output: text,
+        },
+      };
+      dailyFrame.sendAppMessage(msg, '*');
+      addLog('outgoing', '✓ Tool result sendt', { tool_call_id: toolCallId, text });
+      dbgLog('tavus', '→ conversation.tool_result sendt', { tool_call_id: toolCallId, output: text?.slice(0,120), conversation_id: convId });
+    } else {
+      // Fallback: generell respond (brukes hvis tool_call_id mangler)
+      dailyFrame.sendAppMessage({
+        message_type: 'conversation',
+        event_type:   'conversation.respond',
+        conversation_id: convId,
+        properties: { text },
+      }, '*');
+      addLog('outgoing', 'Svar sendt (uten tool_call_id)', { text });
+      dbgLog('tavus', '→ conversation.respond sendt (ingen tool_call_id)', { text: text?.slice(0,120) }, true);
+    }
+  } catch (e) {
+    dbgLog('tavus', 'Feil ved sendAppMessage: ' + e.message, { error: e.message }, true);
+  }
+}
+
+// ================================================================
+// ELEVENLABS PREVIEW
+// ================================================================
+async function previewVoice() {
+  const apiKey = document.getElementById('s-el-api-key').value.trim();
+  const voiceId = document.getElementById('s-el-voice-id').value.trim();
+  const model = document.getElementById('s-el-model').value;
+  if (!apiKey || !voiceId) { showToast('Fyll inn ElevenLabs API-nøkkel og Voice ID', 'error'); return; }
+  showToast('Henter forhåndsvisning...', 'info');
+  try {
+    const stability = parseFloat(document.getElementById('s-el-stability').value);
+    const similarity = parseFloat(document.getElementById('s-el-similarity').value);
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method:'POST',
+      headers:{ 'xi-api-key':apiKey, 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        text:'Hei! Jeg er din norske AI-assistent. Hyggelig å møte deg! Hva kan jeg hjelpe deg med i dag?',
+        model_id:model,
+        voice_settings:{ stability, similarity_boost:similarity }
+      }),
+    });
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    const audio = new Audio(URL.createObjectURL(await res.blob()));
+    audio.play();
+    showToast('✓ Spiller av forhåndsvisning', 'success');
+  } catch (e) { showToast('Feil: ' + e.message, 'error'); }
+}
+
+// ================================================================
+// TEST N8N
+// ================================================================
+async function testN8n() {
+  const url = document.getElementById('s-n8n-url').value.trim();
+  const auth = document.getElementById('s-n8n-auth').value.trim();
+  if (!url) { showToast('Legg inn n8n URL først', 'error'); return; }
+  const headers = { 'Content-Type':'application/json' };
+  if (auth) headers['Authorization'] = auth;
+  try {
+    const res = await fetch(url, { method:'POST', headers,
+      body: JSON.stringify({ conversation_id:'test_'+Date.now(), function_name:'ask_tool',
+        arguments:{ task:'Test fra Tavus-dashboard' }, timestamp:new Date().toISOString(), _test:true }) });
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    const d = await res.json();
+    showToast('✓ n8n svarte: ' + (d.speakable_response||JSON.stringify(d)).slice(0,80), 'success');
+  } catch (e) { showToast('n8n-feil: ' + e.message, 'error'); }
+}
+
+// ================================================================
+// TRANSKRIPSJON
+// ================================================================
+function addTranscriptLine(role, text) {
+  const list = document.getElementById('transcript-list');
+  if (!list) return;
+  const empty = document.getElementById('transcript-empty');
+  if (empty) empty.remove();
+
+  const isUser = role === 'user';
+  const time = new Date().toLocaleTimeString('nb-NO', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+
+  const el = document.createElement('div');
+  el.style.cssText = `display:flex;flex-direction:column;gap:2px;align-items:${isUser ? 'flex-end' : 'flex-start'}`;
+  el.innerHTML = `
+    <div style="font-size:9px;color:var(--muted);${isUser ? 'text-align:right' : ''}">${isUser ? 'Du' : 'AI'} · ${time}</div>
+    <div style="
+      background:${isUser ? 'rgba(99,102,241,.15)' : 'var(--card)'};
+      border:1px solid ${isUser ? 'rgba(99,102,241,.3)' : 'var(--border)'};
+      border-radius:${isUser ? '10px 10px 2px 10px' : '10px 10px 10px 2px'};
+      padding:5px 9px;font-size:11px;color:var(--text);
+      max-width:95%;word-break:break-word;line-height:1.4
+    ">${esc(text)}</div>`;
+  list.appendChild(el);
+  list.scrollTop = list.scrollHeight;
+}
+
+function clearTranscript() {
+  const list = document.getElementById('transcript-list');
+  if (list) list.innerHTML = '<div id="transcript-empty" style="color:var(--muted);font-size:11px;text-align:center;margin-top:16px">Start en samtale...</div>';
+}
+
+// ================================================================
+// DEBUG SYSTEM
+// ================================================================
+let debugEvents = [];
+let debugFilter = 'all';
+let debugErrCount = 0;
+
+const DBG_COLORS = {
+  error:'var(--red)', tool:'var(--purple)', mcp:'var(--blue)',
+  webhook:'var(--yellow)', tavus:'var(--accent)', daily:'var(--green)', info:'var(--muted)'
+};
+const DBG_ICONS = {
+  error:'🔴', tool:'⚙', mcp:'🧠', webhook:'🤖', tavus:'🎥', daily:'📡', info:'·'
+};
+
+function dbgLog(category, label, data, isError) {
+  const now = new Date();
+  const ms = String(now.getMilliseconds()).padStart(3,'0');
+  const entry = {
+    id: debugEvents.length,
+    category: isError ? 'error' : (category || 'info'),
+    label: label || '',
+    data: data || {},
+    isError: !!(isError || category === 'error'),
+    timeStr: now.toLocaleTimeString('nb-NO', {hour12:false}) + '.' + ms,
+    ts: now.getTime(),
+  };
+  debugEvents.push(entry);
+
+  if (entry.isError) {
+    debugErrCount++;
+    const badge = document.getElementById('debug-badge');
+    if (badge) { badge.style.display = 'inline'; badge.textContent = debugErrCount; }
+  }
+
+  updateDebugStats();
+  const panel = document.getElementById('panel-debug');
+  if (panel?.classList.contains('active')) appendDebugEntry(entry);
+}
+
+function updateDebugStats() {
+  const set = (id, v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+  set('dbg-total',  debugEvents.length);
+  set('dbg-errors', debugEvents.filter(e=>e.isError).length);
+  set('dbg-tools',  debugEvents.filter(e=>e.category==='tool').length);
+  set('dbg-mcps',   debugEvents.filter(e=>e.category==='mcp').length);
+  set('dbg-whs',    debugEvents.filter(e=>e.category==='webhook').length);
+}
+
+function entryMatchesFilter(e) {
+  if (debugFilter === 'error'   && !e.isError)                return false;
+  if (debugFilter === 'tool'    && e.category !== 'tool')     return false;
+  if (debugFilter === 'mcp'     && e.category !== 'mcp')      return false;
+  if (debugFilter === 'webhook' && e.category !== 'webhook')  return false;
+  if (debugFilter === 'tavus'   && e.category !== 'tavus')    return false;
+  if (debugFilter === 'daily'   && e.category !== 'daily')    return false;
+  const search = (document.getElementById('dbg-search')?.value||'').toLowerCase();
+  if (search) {
+    const hay = (e.label + JSON.stringify(e.data)).toLowerCase();
+    if (!hay.includes(search)) return false;
+  }
+  return true;
+}
+
+function makeDbgEntryHtml(e) {
+  const color = DBG_COLORS[e.category] || 'var(--muted)';
+  const icon  = DBG_ICONS[e.category]  || '·';
+  const hasData = Object.keys(e.data).length > 0;
+  return `<div class="dbg-entry cat-${e.category}" id="dbge-${e.id}">
+    <div style="display:flex;align-items:center;gap:6px">
+      <span style="color:${color};flex-shrink:0">${icon}</span>
+      <span style="color:${color};font-size:10px;font-weight:700;text-transform:uppercase;flex-shrink:0;min-width:52px">${e.category}</span>
+      <span style="flex:1;color:var(--text);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.label)}</span>
+      <span style="color:var(--muted);font-size:10px;flex-shrink:0;font-family:monospace">${e.timeStr}</span>
+    </div>
+    ${hasData ? `<details><summary>▸ data</summary><pre>${esc(JSON.stringify(e.data,null,2))}</pre></details>` : ''}
+  </div>`;
+}
+
+function appendDebugEntry(e) {
+  if (!entryMatchesFilter(e)) return;
+  const list = document.getElementById('dbg-list');
+  const empty = document.getElementById('dbg-empty');
+  if (!list) return;
+  if (empty) empty.style.display = 'none';
+  list.insertAdjacentHTML('beforeend', makeDbgEntryHtml(e));
+  const autoScroll = document.getElementById('dbg-autoscroll');
+  if (autoScroll?.checked) list.scrollTop = list.scrollHeight;
+}
+
+function renderDebugLog() {
+  const list = document.getElementById('dbg-list');
+  const empty = document.getElementById('dbg-empty');
+  if (!list) return;
+  const filtered = debugEvents.filter(entryMatchesFilter);
+  if (empty) empty.style.display = filtered.length === 0 ? 'flex' : 'none';
+  list.innerHTML = filtered.map(makeDbgEntryHtml).join('');
+  const autoScroll = document.getElementById('dbg-autoscroll');
+  if (autoScroll?.checked) list.scrollTop = list.scrollHeight;
+}
+
+function setDebugFilter(f, btn) {
+  debugFilter = f;
+  document.querySelectorAll('.dbg-filter').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderDebugLog();
+}
+
+function copyDebugLog() {
+  const lines = debugEvents.map(e => {
+    let s = `[${e.timeStr}] [${e.category.toUpperCase()}] ${e.label}`;
+    if (Object.keys(e.data).length) s += '\n' + JSON.stringify(e.data, null, 2);
+    return s;
+  }).join('\n\n');
+  navigator.clipboard.writeText(lines)
+    .then(() => showToast('✓ Debug-logg kopiert til utklippstavlen', 'success'))
+    .catch(() => showToast('Kunne ikke kopiere – sjekk nettlesertillatelser', 'error'));
+}
+
+function clearDebugLog() {
+  debugEvents = [];
+  debugErrCount = 0;
+  const badge = document.getElementById('debug-badge');
+  if (badge) badge.style.display = 'none';
+  updateDebugStats();
+  const list = document.getElementById('dbg-list');
+  if (list) list.innerHTML = '';
+  const empty = document.getElementById('dbg-empty');
+  if (empty) empty.style.display = 'flex';
+}
+
+// ================================================================
+// KLOKKE
+// ================================================================
+function updateClock() {
+  const now = new Date();
+  const t = now.toLocaleTimeString('nb-NO');
+  const d = now.toLocaleDateString('nb-NO', { weekday:'long', day:'numeric', month:'long' });
+  const c = document.getElementById('sidebar-clock');
+  const dd = document.getElementById('sidebar-date');
+  if (c) c.textContent = t;
+  if (dd) dd.textContent = d.charAt(0).toUpperCase() + d.slice(1);
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ================================================================
+// API STATUS
+// ================================================================
+function setApiStatus(id, status, label) {
+  const row = document.getElementById('api-' + id);
+  const val = document.getElementById('apival-' + (id === 'webhooks' ? 'webhooks' : id === 'homey' ? 'homey' : id === 'tavus' ? 'tavus' : 'el'));
+  if (!row) return;
+  const dot = row.querySelector('.api-dot');
+  dot.className = 'api-dot ' + status;
+  if (val) val.textContent = label;
+}
+
+async function checkAllApis() {
+  const s = getSettings();
+
+  // Tavus
+  setApiStatus('tavus', 'checking', 'sjekker...');
+  if (!s.apiKey) { setApiStatus('tavus', 'skip', 'ingen nøkkel'); }
+  else {
+    try {
+      const r = await fetch(`https://tavusapi.com/v2/personas/${s.personaId}`,
+        { headers: { 'x-api-key': s.apiKey } });
+      if (r.ok) setApiStatus('tavus', 'ok', 'tilkoblet');
+      else       setApiStatus('tavus', 'err', 'HTTP ' + r.status);
+    } catch { setApiStatus('tavus', 'err', 'feil'); }
+  }
+
+  // ElevenLabs
+  setApiStatus('elevenlabs', 'checking', 'sjekker...');
+  if (!s.elApiKey) { setApiStatus('elevenlabs', 'skip', 'ingen nøkkel'); }
+  else {
+    try {
+      const r = await fetch('https://api.elevenlabs.io/v1/user',
+        { headers: { 'xi-api-key': s.elApiKey } });
+      if (r.ok) { const d=await r.json(); setApiStatus('elevenlabs', 'ok', d.subscription?.tier || 'tilkoblet'); }
+      else       setApiStatus('elevenlabs', 'err', 'HTTP ' + r.status);
+    } catch { setApiStatus('elevenlabs', 'err', 'feil'); }
+  }
+
+  // Homey MCP
+  setApiStatus('homey', 'checking', 'sjekker...');
+  const homeyUrl = getHomeyMcpUrl();
+  if (!homeyUrl) { setApiStatus('homey', 'skip', 'ikke konfigurert'); }
+  else {
+    try {
+      const r = await fetch(homeyUrl, { method:'POST',
+        headers: MCP_HEADERS,
+        body: JSON.stringify({ jsonrpc:'2.0', id:1, method:'initialize',
+          params:{ protocolVersion:'2024-11-05', capabilities:{}, clientInfo:{name:'status-check',version:'1'} } }),
+        signal: AbortSignal.timeout(4000),
+      });
+      if (r.ok) {
+        setApiStatus('homey', 'ok', 'tilkoblet');
+        dbgLog('mcp', 'Homey MCP status-sjekk OK', { url: homeyUrl, status: r.status });
+      } else {
+        setApiStatus('homey', 'err', 'HTTP ' + r.status);
+        dbgLog('mcp', 'Homey MCP status-sjekk: HTTP ' + r.status, { url: homeyUrl }, true);
+      }
+    } catch (e) {
+      if (e.name === 'TimeoutError') {
+        setApiStatus('homey', 'err', 'timeout');
+        dbgLog('mcp', 'Homey MCP timeout (4s)', { url: homeyUrl }, true);
+      } else {
+        // "Failed to fetch" betyr vanligvis CORS – vis gul advarsel, ikke rød feil
+        // MCP kan fortsatt fungere i selve samtalen (server-side)
+        setApiStatus('homey', 'warn', '⚠ CORS?');
+        dbgLog('mcp', 'Homey MCP: Failed to fetch – sannsynlig CORS-begrensning', {
+          url: homeyUrl, error: e.message,
+          forklaring: 'Nettleseren blokkerer forespørselen pga CORS. MCP kan likevel fungere under samtalen hvis serveren aksepterer Tavus-forespørsler direkte. Sjekk at MCP-serveren sender Access-Control-Allow-Origin header.'
+        }, false);
+      }
+    }
+  }
+
+  // Webhooks
+  setApiStatus('webhooks', 'checking', 'sjekker...');
+  if (!s.webhooks.length) { setApiStatus('webhooks', 'skip', 'ingen konfigurert'); }
+  else {
+    setApiStatus('webhooks', 'ok', `${s.webhooks.length} konfigurert`);
+    document.getElementById('apival-webhooks').textContent = s.webhooks.map(w=>w.name).join(', ');
+  }
+}
+
+// ================================================================
+// INIT
+// ================================================================
+initDefaults();
+
+// Auto-sjekk API ved oppstart
+setTimeout(checkAllApis, 800);
+
+if (window.location.protocol === 'file:') {
+  const b = document.createElement('div');
+  b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#7c2d12;color:#fef3c7;font-size:13px;padding:9px 20px;text-align:center';
+  b.innerHTML = '⚠️ <strong>Åpnet som fil – kamera/mikrofon vil ikke fungere.</strong> Kjør: <code style="background:rgba(0,0,0,.3);padding:2px 8px;border-radius:4px">cd ~/Desktop/tavus-n8n-mcp && python3 -m http.server 9090</code> og åpne <a href="http://localhost:9090/tavus-dashboard.html" style="color:#fef3c7;font-weight:700">localhost:9090/tavus-dashboard.html</a>';
+  document.body.prepend(b);
+}
+</script>
+</body>
+</html>

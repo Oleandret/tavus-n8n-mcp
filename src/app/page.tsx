@@ -686,7 +686,7 @@ export default function Dashboard() {
                     {formatTime(log.timestamp)}
                   </span>
                 </div>
-                {log.data && Object.keys(log.data as object).length > 0 && (
+                {log.data != null && Object.keys(log.data as Record<string, unknown>).length > 0 && (
                   <details className="mt-1">
                     <summary className="text-slate-500 cursor-pointer hover:text-slate-300">
                       data
